@@ -1,10 +1,10 @@
 [project]
-name = "publikclip-pipeline"
+name = "tetclipper-pipeline"
 version = "0.2.5"
-description = "publikclip processing pipeline: long video in, scored vertical clips out"
+description = "tetclipper processing pipeline: long video in, scored vertical clips out"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.12,<3.13"
-# Intentionally empty: `uv run <anything>` (including a bare `publikclip
+# Intentionally empty: `uv run <anything>` (including a bare `tetclipper
 # --jsonl run <url>`, exactly what the desktop app's sidecar invokes) syncs
 # ALL of [project.dependencies] before it will execute ANY command, no
 # matter how cheap that command is — see the "pipeline" group below and
@@ -13,7 +13,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = []
 
 [project.scripts]
-publikclip = "publikclip_pipeline.cli:main"
+tetclipper = "tetclipper_pipeline.cli:main"
 
 [dependency-groups]
 dev = [
@@ -25,7 +25,7 @@ dev = [
 # a bare `uv run`/`uv sync` the same as `dependencies` — only
 # dependency-groups outside `default-groups` are skipped by default).
 #
-# Why: the whole point of this split is so `uv run publikclip ...` can
+# Why: the whole point of this split is so `uv run tetclipper ...` can
 # start cli.py, create a job and print the first `{"event":"job",...}`
 # line even when this multi-GB, network-heavy install hasn't happened yet
 # or can't happen right now (see cli.py's `_execute()` /
@@ -41,6 +41,11 @@ dev = [
 # pipeline group includes it, so one marker covers both once a job has run.
 net = [
     "httpx>=0.27",
+]
+# The web shell (`tetclipper serve`): the browser UI's HTTP API.
+server = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 pipeline = [
     { include-group = "net" },
@@ -59,10 +64,10 @@ pipeline = [
 
 [tool.uv]
 # Neither group syncs by default. `dev` (pytest) has no business being
-# installed for the app's own `uv run publikclip ...` invocation either —
+# installed for the app's own `uv run tetclipper ...` invocation either —
 # it was only ever needed for `uv run pytest`, which now asks for it
 # explicitly (`uv sync --group dev --group pipeline`, see README.md). A
-# bare `uv run publikclip ...` (what the desktop app's sidecar spawns)
+# bare `uv run tetclipper ...` (what the desktop app's sidecar spawns)
 # now has zero required dependencies to sync, so it starts even with no
 # network and no pre-existing cache.
 default-groups = []
@@ -71,7 +76,7 @@ default-groups = []
 # uv's own native build backend (implemented inside the `uv` binary, not a
 # PyPI package `uv run` has to fetch) instead of hatchling. Building the
 # local project — needed for EVERY `uv run`, including a bare
-# `uv run publikclip ...` — used to silently need network to fetch
+# `uv run tetclipper ...` — used to silently need network to fetch
 # hatchling itself whenever the cache was empty (e.g. a fresh install);
 # uv_build needs neither network nor cache for this project's own build.
 requires = ["uv_build>=0.12.10,<0.13.0"]

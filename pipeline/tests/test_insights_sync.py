@@ -11,15 +11,15 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from publikclip_pipeline import config
-from publikclip_pipeline.insights import calibration, instagram
-from publikclip_pipeline.scoring import constants as constants_mod
-from publikclip_pipeline.scoring import rubric
+from tetclipper_pipeline import config
+from tetclipper_pipeline.insights import calibration, instagram
+from tetclipper_pipeline.scoring import constants as constants_mod
+from tetclipper_pipeline.scoring import rubric
 
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
     yield
 
 

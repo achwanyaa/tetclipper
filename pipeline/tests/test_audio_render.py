@@ -4,9 +4,9 @@ every stage checkpoint; these pieces are what's actually new here)."""
 
 from __future__ import annotations
 
-from publikclip_pipeline.audio_library.library import Item as LibItem
-from publikclip_pipeline.edits import render_clip as rc
-from publikclip_pipeline.edits.timeline import AudioItem
+from tetclipper_pipeline.audio_library.library import Item as LibItem
+from tetclipper_pipeline.edits import render_clip as rc
+from tetclipper_pipeline.edits.timeline import AudioItem
 
 
 def _lib_item(item_id, duration, licence=None, attribution=None):

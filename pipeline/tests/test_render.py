@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from publikclip_pipeline.captions import ass as ass_mod
-from publikclip_pipeline.render import ffmpeg_bin, renderer
+from tetclipper_pipeline.captions import ass as ass_mod
+from tetclipper_pipeline.render import ffmpeg_bin, renderer
 
 
 def test_crop_boxes_even_and_bounded():
@@ -84,7 +84,7 @@ def test_render_smoke(tmp_path):
     caption burn → verified 9:16 output."""
     src = tmp_path / "src.mp4"
     # Resolve like the product does — on a bare machine (Windows CI) the only
-    # ffmpeg is the fetched static one, reachable via PUBLIKCLIP_FFMPEG.
+    # ffmpeg is the fetched static one, reachable via TETCLIPPER_FFMPEG.
     subprocess.run(
         [
             ffmpeg_bin.ffmpeg(), "-v", "error", "-y",

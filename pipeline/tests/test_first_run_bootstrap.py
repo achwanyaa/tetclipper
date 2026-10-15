@@ -16,9 +16,9 @@ import subprocess
 
 import pytest
 
-from publikclip_pipeline import cli
-from publikclip_pipeline.ingest import stage as ingest_stage
-from publikclip_pipeline.jobs import queue
+from tetclipper_pipeline import cli
+from tetclipper_pipeline.ingest import stage as ingest_stage
+from tetclipper_pipeline.jobs import queue
 
 
 def _fake_uv(tmp_path, name="uv"):
@@ -31,20 +31,20 @@ def _fake_uv(tmp_path, name="uv"):
 def test_uv_binary_prefers_the_one_the_shell_bundles(tmp_path, monkeypatch):
     bundled = _fake_uv(tmp_path, "bundled-uv")
     exported = _fake_uv(tmp_path, "exported-uv")
-    monkeypatch.setenv("PUBLIKCLIP_UV", bundled)
+    monkeypatch.setenv("TETCLIPPER_UV", bundled)
     monkeypatch.setenv("UV", exported)
     assert cli._uv_binary() == bundled
 
 
 def test_uv_binary_falls_back_to_the_one_uv_run_exports(tmp_path, monkeypatch):
     exported = _fake_uv(tmp_path)
-    monkeypatch.delenv("PUBLIKCLIP_UV", raising=False)
+    monkeypatch.delenv("TETCLIPPER_UV", raising=False)
     monkeypatch.setenv("UV", exported)
     assert cli._uv_binary() == exported
 
 
 def test_uv_binary_ignores_a_path_that_does_not_exist(tmp_path, monkeypatch):
-    monkeypatch.setenv("PUBLIKCLIP_UV", str(tmp_path / "gone"))
+    monkeypatch.setenv("TETCLIPPER_UV", str(tmp_path / "gone"))
     monkeypatch.delenv("UV", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path))  # nothing named uv on it
     assert cli._uv_binary() == "uv"
@@ -53,8 +53,8 @@ def test_uv_binary_ignores_a_path_that_does_not_exist(tmp_path, monkeypatch):
 def test_dependency_sync_runs_the_bundled_uv_when_path_has_no_uv(tmp_path, monkeypatch):
     """The failure from the field: a bare PATH and a bundled uv."""
     bundled = _fake_uv(tmp_path)
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("PUBLIKCLIP_UV", bundled)
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_UV", bundled)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
     seen: dict = {}
@@ -71,7 +71,7 @@ def test_dependency_sync_runs_the_bundled_uv_when_path_has_no_uv(tmp_path, monke
 
 
 def _ingest_ctx(tmp_path, monkeypatch, source):
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
     job = queue.create_job("file", str(source), "{}")
     return queue.StageContext(job=job, settings=None, progress=lambda *_: None)
 
@@ -119,8 +119,8 @@ def test_net_sync_uses_the_bundled_uv_and_never_uninstalls_the_pipeline_group(tm
     screen before any job ran died with `ig tool produced no JSON:
     Traceback … No module named 'httpx'`."""
     bundled = _fake_uv(tmp_path)
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("PUBLIKCLIP_UV", bundled)
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_UV", bundled)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
     seen: dict = {}
@@ -141,7 +141,7 @@ def test_net_sync_is_skipped_once_the_pipeline_group_is_in(tmp_path, monkeypatch
     home = tmp_path / "home"
     home.mkdir()
     (home / ".pipeline_deps_synced").write_text("ok")
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(home))
+    monkeypatch.setenv("TETCLIPPER_HOME", str(home))
     monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: pytest.fail("synced anyway"))
     assert cli._ensure_net_deps(False, lambda *_: None) == (True, None)
 
@@ -150,7 +150,7 @@ def test_net_sync_is_skipped_once_the_pipeline_group_is_in(tmp_path, monkeypatch
 def test_loop_and_library_commands_answer_json_when_the_net_sync_fails(argv, tmp_path, monkeypatch, capsys):
     import json
 
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(cli, "_ensure_net_deps", lambda *_: (False, "no network"))
     assert cli.main(argv) == 1
     last = capsys.readouterr().out.strip().splitlines()[-1]
@@ -163,7 +163,7 @@ def test_loop_and_library_commands_answer_json_when_the_net_sync_fails(argv, tmp
 def test_loop_and_library_commands_sync_net_deps_before_importing(argv, tmp_path, monkeypatch, capsys):
     import json
 
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
     calls: list[str] = []
     monkeypatch.setattr(cli, "_ensure_net_deps", lambda *_: calls.append("net") or (True, None))
     assert cli.main(argv) == 0

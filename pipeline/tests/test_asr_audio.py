@@ -17,8 +17,8 @@ import wave
 import numpy as np
 import pytest
 
-from publikclip_pipeline.asr import stage as asr_stage
-from publikclip_pipeline.render import ffmpeg_bin
+from tetclipper_pipeline.asr import stage as asr_stage
+from tetclipper_pipeline.render import ffmpeg_bin
 
 FINDER_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 

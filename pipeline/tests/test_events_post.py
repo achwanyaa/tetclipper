@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from publikclip_pipeline.events import post
-from publikclip_pipeline.events.dsp import long_pauses
+from tetclipper_pipeline.events import post
+from tetclipper_pipeline.events.dsp import long_pauses
 
 
 def test_hysteresis_enters_high_stays_low():

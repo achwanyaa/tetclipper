@@ -11,19 +11,19 @@ import wave
 import numpy as np
 import pytest
 
-from publikclip_pipeline.audio_library import library
-from publikclip_pipeline.audio_library.sources import (
+from tetclipper_pipeline.audio_library import library
+from tetclipper_pipeline.audio_library.sources import (
     Result,
     is_allowed,
     parse_cc_licence,
 )
-from publikclip_pipeline.audio_library.sources import freesound, jamendo
-from publikclip_pipeline.render import ffmpeg_bin
+from tetclipper_pipeline.audio_library.sources import freesound, jamendo
+from tetclipper_pipeline.render import ffmpeg_bin
 
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
     yield
 
 
@@ -247,7 +247,7 @@ class _FakeResponse:
 def _write_secrets(monkeypatch, **keys):
     import json
 
-    from publikclip_pipeline import config
+    from tetclipper_pipeline import config
 
     config.ensure_home()
     (config.home_dir() / "secrets.json").write_text(json.dumps(keys))

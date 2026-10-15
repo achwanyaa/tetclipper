@@ -10,11 +10,11 @@ import re
 
 import pytest
 
-from publikclip_pipeline import config
-from publikclip_pipeline.audio_library import library, starter_pack
-from publikclip_pipeline.audio_library.sources import freesound
-from publikclip_pipeline.audio_library.starter_pack import STARTER_PACK
-from publikclip_pipeline.edits.audio_suggest import SUGGEST_TAGS
+from tetclipper_pipeline import config
+from tetclipper_pipeline.audio_library import library, starter_pack
+from tetclipper_pipeline.audio_library.sources import freesound
+from tetclipper_pipeline.audio_library.starter_pack import STARTER_PACK
+from tetclipper_pipeline.edits.audio_suggest import SUGGEST_TAGS
 
 _TAG_SPLIT = re.compile(r"[^a-z0-9]+")
 
@@ -53,7 +53,7 @@ def test_starter_pack_has_both_kinds():
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
     yield
 
 

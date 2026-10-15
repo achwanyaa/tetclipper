@@ -3,8 +3,8 @@ and a fake clip brief, never touching real audio files."""
 
 from __future__ import annotations
 
-from publikclip_pipeline.audio_library.library import Item as LibItem
-from publikclip_pipeline.edits import audio_suggest as sug
+from tetclipper_pipeline.audio_library.library import Item as LibItem
+from tetclipper_pipeline.edits import audio_suggest as sug
 
 
 def _music(item_id, tags, bpm=None):

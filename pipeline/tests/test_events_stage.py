@@ -1,4 +1,4 @@
-"""Regression tests for cluster publikclip-pipeline-exit-listen-panns.
+"""Regression tests for cluster tetclipper-pipeline-exit-listen-panns.
 
 Symptom: the LISTEN stage crashes while "Detecting audio events (PANNs)…"
 after the PANNs AudioSet checkpoint (models/specs.py's PANNS_CNN14_MAX, no
@@ -40,16 +40,16 @@ import json
 import numpy as np
 import pytest
 
-from publikclip_pipeline import cli, config
-from publikclip_pipeline.events.stage import EventsStage
-from publikclip_pipeline.jobs import queue
-from publikclip_pipeline.models import registry
-from publikclip_pipeline.vendor.panns import models as panns_models
+from tetclipper_pipeline import cli, config
+from tetclipper_pipeline.events.stage import EventsStage
+from tetclipper_pipeline.jobs import queue
+from tetclipper_pipeline.models import registry
+from tetclipper_pipeline.vendor.panns import models as panns_models
 
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
     yield
 
 
@@ -159,7 +159,7 @@ def test_cli_execute_reports_panns_crash_gracefully_not_uncaught(tmp_path, monke
         def run(self, ctx):
             raise _pickle.UnpicklingError("invalid load key, 'O'.")
 
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(cli, "_stages", lambda: [ExplodingEventsStage()])
     # Stand in for a machine that has already done the one-time dep sync.
     # Without this the bootstrap shells out to `uv sync`, which under pytest
@@ -180,10 +180,10 @@ def test_cli_execute_reports_panns_crash_gracefully_not_uncaught(tmp_path, monke
 def test_cli_execute_marks_job_failed_when_dep_bootstrap_fails(tmp_path, monkeypatch):
     """The one-time `uv sync --group pipeline` can fail (no network, a
     blocked host, an interrupted first run). _execute() reports it, but the
-    job row must not be left at "pending" -- `publikclip jobs` would list it
+    job row must not be left at "pending" -- `tetclipper jobs` would list it
     as still queued forever and nothing would ever retry or clear it."""
 
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(
         cli, "_ensure_pipeline_deps", lambda jsonl, emit: (False, "network unreachable")
     )

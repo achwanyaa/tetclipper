@@ -24,9 +24,9 @@ import wave
 import numpy as np
 import pytest
 
-from publikclip_pipeline import config, sysinfo
-from publikclip_pipeline.asr import stage as asr_stage
-from publikclip_pipeline.jobs import queue
+from tetclipper_pipeline import config, sysinfo
+from tetclipper_pipeline.asr import stage as asr_stage
+from tetclipper_pipeline.jobs import queue
 
 GIB = sysinfo.GIB
 MKL = "mkl_malloc: failed to allocate memory"
@@ -35,9 +35,9 @@ TORCH_OOM = "[enforce fail at alloc_cpu.cpp:114] . DefaultCPUAllocator: not enou
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
-    monkeypatch.setenv("PUBLIKCLIP_HOME", str(tmp_path / "home"))
-    monkeypatch.delenv("PUBLIKCLIP_ASR_MODEL", raising=False)
-    monkeypatch.delenv("PUBLIKCLIP_MEM_AVAILABLE_MB", raising=False)
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("TETCLIPPER_ASR_MODEL", raising=False)
+    monkeypatch.delenv("TETCLIPPER_MEM_AVAILABLE_MB", raising=False)
 
 
 def _wav(path, seconds: float = 1.0) -> None:
@@ -224,14 +224,14 @@ def test_a_download_failure_never_cascades_to_a_smaller_model(tmp_path, monkeypa
 
 
 def test_forced_model_is_the_only_one_tried(tmp_path, monkeypatch):
-    monkeypatch.setenv("PUBLIKCLIP_ASR_MODEL", "base")
+    monkeypatch.setenv("TETCLIPPER_ASR_MODEL", "base")
     wx = _fake_whisperx({})
 
     out, messages = _run(tmp_path, monkeypatch, wx, available=1 * GIB)
 
     assert wx.loads == ["base"]
     assert out["model"] == "base"
-    assert "PUBLIKCLIP_ASR_MODEL=base" in messages
+    assert "TETCLIPPER_ASR_MODEL=base" in messages
 
 
 def test_memory_errors_are_recognised_by_wording_not_type():
@@ -264,7 +264,7 @@ def test_plan_starts_at_the_first_model_that_fits():
 
 
 def test_sysinfo_override_env_wins(monkeypatch):
-    monkeypatch.setenv("PUBLIKCLIP_MEM_AVAILABLE_MB", "2048")
+    monkeypatch.setenv("TETCLIPPER_MEM_AVAILABLE_MB", "2048")
     assert sysinfo.available_memory_bytes() == 2 * GIB
 
 
