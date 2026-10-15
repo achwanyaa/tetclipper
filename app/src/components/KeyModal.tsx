@@ -1,72 +1,10 @@
 import { useEffect, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { openUrl } from '@tauri-apps/plugin-opener'
+import { invoke } from '../backend'
 import { api } from '../api'
-import type { PublikStatus } from '../types'
-import { PUBLIK_DATA_PATH, PUBLIK_PRE_SETUP, PublikReady } from './PublikCard'
+import type { TelegramStatus } from '../types'
 
-/** Post-onboarding brain + key management: publik API first, then your own
- * Gemini key, then Pexels. */
-
-function PublikRow() {
-  const [publik, setPublik] = useState<PublikStatus | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState<string | null>(null)
-
-  useEffect(() => {
-    api.publikStatus().then(setPublik).catch(() => setPublik(null))
-  }, [])
-
-  async function act(fn: () => Promise<PublikStatus>) {
-    setBusy(true)
-    setNote(null)
-    try {
-      setPublik(await fn())
-    } catch (err) {
-      setNote(String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const ready = publik?.provisioned && !publik.status?.disconnected
-  const state = publik === null
-    ? 'checking…'
-    : publik.status?.disconnected
-      ? 'Disconnected'
-      : publik.provisioned
-        ? 'Ready'
-        : 'Not set up'
-
-  return (
-    <div className="publik-row">
-      <p className="audit-label">PUBLIK API · {state.toUpperCase()}</p>
-      {ready && publik ? (
-        <PublikReady publik={publik} />
-      ) : (
-        <>
-          <p className="ig-intro">{PUBLIK_PRE_SETUP}</p>
-          <p className="ig-intro">{PUBLIK_DATA_PATH}</p>
-        </>
-      )}
-      <div className="publik-actions">
-        {ready ? (
-          <button className="btn-ghost" disabled={busy} onClick={() => act(api.publikDisconnect)}>
-            Disconnect publik API
-          </button>
-        ) : (
-          <button className="btn-secondary" disabled={busy || publik === null} onClick={() => act(api.publikProvision)}>
-            {busy ? 'Setting up…' : publik?.status?.disconnected ? 'Reconnect publik API' : 'Set up publik API'}
-          </button>
-        )}
-        <button className="btn-ghost" onClick={() => openUrl('https://publikhq.com/developers#why')}>
-          How pricing works ↗
-        </button>
-      </div>
-      {note && <p className="ig-message mono">{note}</p>}
-    </div>
-  )
-}
+/** Post-onboarding brain + key management: your own Gemini key (optional;
+ * the default brain is Claude Code), Pexels, audio sources, Telegram. */
 
 interface Props {
   onClose: () => void
@@ -150,6 +88,71 @@ function JamendoField() {
   )
 }
 
+function TelegramSection() {
+  const [status, setStatus] = useState<TelegramStatus | null>(null)
+  const [token, setToken] = useState('')
+  const [note, setNote] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api.telegramStatus().then(setStatus).catch(() => null)
+  }, [])
+
+  const run = async (fn: () => Promise<TelegramStatus>) => {
+    setBusy(true)
+    setNote(null)
+    try {
+      setStatus(await fn())
+    } catch (err) {
+      setNote(String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <p className="ig-intro">
+        Rendered clips can go straight to a Telegram chat through a bot you own
+        (make one with @BotFather).{' '}
+        {status?.chat_id ? (
+          <strong>Linked to {status.chat_name ?? status.chat_id} ✓</strong>
+        ) : status?.has_token ? (
+          <strong>Token saved — now link a chat.</strong>
+        ) : null}
+      </p>
+      <div className="ig-form">
+        <input
+          placeholder={status?.has_token ? 'replace bot token…' : '123456:ABC… (from @BotFather)'}
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          className="mono"
+        />
+        <button
+          className="btn-secondary"
+          disabled={!token.trim() || busy}
+          onClick={() => run(() => api.telegramSaveToken(token)).then(() => setToken(''))}
+        >
+          save
+        </button>
+      </div>
+      {status?.has_token && (
+        <div className="ig-form" style={{ marginTop: 10 }}>
+          <span className="ig-intro" style={{ flex: 1 }}>
+            Send <span className="mono">/start</span> to{' '}
+            <strong>@{status.bot_username ?? 'your bot'}</strong> in Telegram, then:
+          </span>
+          <button className="btn-primary" disabled={busy} onClick={() => run(api.telegramLink)}>
+            {busy ? 'LINKING…' : status.chat_id ? 'RE-LINK CHAT' : 'LINK CHAT'}
+          </button>
+        </div>
+      )}
+      {note && <p className="ig-message mono">{note}</p>}
+    </>
+  )
+}
+
 export default function KeyModal({ onClose }: Props) {
   const [key, setKey] = useState('')
   const [hasKey, setHasKey] = useState<boolean | null>(null)
@@ -175,11 +178,10 @@ export default function KeyModal({ onClose }: Props) {
           <p className="audit-kicker">THE BRAIN</p>
           <button className="btn-ghost" onClick={onClose}>close ✕</button>
         </header>
-        <PublikRow />
         <p className="audit-label" style={{ marginTop: 22 }}>YOUR OWN GEMINI KEY</p>
         <p className="ig-intro">
           Prefer your own Google key? Gemini scores at the same quality; your key lives
-          in <span className="mono">~/.publikclip/secrets.json</span>, chmod 600, and
+          in <span className="mono">~/.tetclipper/secrets.json</span>, chmod 600, and
           never goes anywhere but Google.{' '}
           {hasKey && <strong>A key is currently saved{saved ? ' — updated ✓' : ''}.</strong>}
         </p>
@@ -202,6 +204,8 @@ export default function KeyModal({ onClose }: Props) {
         <FreesoundField />
         <p className="audit-label" style={{ marginTop: 22 }}>JAMENDO (MUSIC)</p>
         <JamendoField />
+        <p className="audit-label" style={{ marginTop: 22 }}>TELEGRAM (DELIVERY)</p>
+        <TelegramSection />
         <p className="ig-message mono">
           Applies to new runs; a job mid-flight keeps the brain it started with.
         </p>

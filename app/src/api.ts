@@ -1,5 +1,9 @@
-import { invoke, convertFileSrc } from '@tauri-apps/api/core'
+import { fileUrl, invoke } from './backend'
 import type { UpdateNotice,
+  JobTranscript,
+  TelegramStatus,
+  RemoteJobs,
+  ChatMessage,
   AudioItem,
   AudioKeysStatus,
   JobResults,
@@ -7,18 +11,23 @@ import type { UpdateNotice,
   LibraryItem,
   LoopOverview,
   OnlineAudioResult,
-  PublikStatus,
   SetupState,
   SyncSummary
 } from './types'
 
 export const api = {
-  runJob: (source: string, llm: string, captions: string) =>
-    invoke<void>('run_job', { source, llm, captions }),
+  runJob: (source: string, llm: string, captions: string, language?: string) =>
+    invoke<void>('run_job', { source, llm, captions, language }),
   resumeJob: (jobId: string, llm?: string, captions?: string, camera?: string) =>
     invoke<void>('resume_job', { jobId, llm, captions, camera }),
   jobResults: (jobId: string) => invoke<JobResults>('job_results', { jobId }),
   listJobs: () => invoke<JobSummary[]>('list_job_dirs'),
+  /** How many pipeline runs are alive on the server (0 after a restart). */
+  pipelineActive: () => invoke<{ running: number }>('pipeline_active'),
+  jobTranscript: (jobId: string) => invoke<JobTranscript>('job_transcript', { jobId }),
+  /** Cut a hand-picked source range into a new clip (streams pipeline-event). */
+  addClipRange: (jobId: string, start: number, end: number, captions: string, camera: string) =>
+    invoke<void>('add_clip_range', { jobId, start, end, captions, camera }),
   saveGeminiKey: (key: string) => invoke<boolean>('save_gemini_key', { key }),
   setupState: () => invoke<SetupState>('get_setup_state'),
   markOnboarded: () => invoke<void>('mark_onboarded'),
@@ -36,15 +45,9 @@ export const api = {
     invoke<{ ok: boolean }>('ig_tool', { args: ['unlink', mediaId] }),
   igReject: (mediaId: string, jobId: string, clip: number) =>
     invoke<{ ok: boolean }>('ig_tool', { args: ['reject', mediaId, jobId, String(clip)] }),
-  /** cheap: the files on disk, no network */
-  publikStatus: () => invoke<PublikStatus>('publik_status'),
-  /** GET /wallet, rewrites the status file from the server's answer; offline returns the files */
-  publikRefresh: () => invoke<PublikStatus>('publik_refresh'),
-  publikProvision: () => invoke<PublikStatus>('publik_provision'),
-  publikDisconnect: () => invoke<PublikStatus>('publik_disconnect'),
   /** one GET to GitHub's latest release on launch; offline it says nothing */
   checkUpdate: () => invoke<UpdateNotice>('check_update'),
-  fileUrl: (path: string) => convertFileSrc(path),
+  fileUrl,
 
   /* ---------- music / sfx library ---------- */
   audioImport: (paths: string[], kind: 'auto' | 'music' | 'sfx') =>
@@ -69,9 +72,34 @@ export const api = {
   saveFreesoundKey: (key: string) => invoke<boolean>('save_freesound_key', { key }),
   saveJamendoKey: (key: string) => invoke<boolean>('save_jamendo_key', { key }),
   audioKeysStatus: () => invoke<AudioKeysStatus>('audio_keys_status'),
-  runAudioBootstrap: () => invoke<void>('run_audio_bootstrap')
-}
+  runAudioBootstrap: () => invoke<void>('run_audio_bootstrap'),
 
-/** micros → "$0.18" (publik API balances are integer micros of a dollar). */
-export const dollars = (micros?: number | null) =>
-  micros == null ? '' : '$' + (micros / 1_000_000).toFixed(2)
+  /* ---------- chat with Claude Code about one video ---------- */
+  chatHistory: (jobId: string) =>
+    invoke<{ session_id: string | null; messages: ChatMessage[]; available: boolean }>('chat_history', { jobId }),
+  /** Starts one turn; replies stream as pipeline-event {event: 'chat'}. */
+  chatSend: (jobId: string, message: string) => invoke<void>('chat_send', { jobId, message }),
+  chatReset: (jobId: string) => invoke<void>('chat_reset', { jobId }),
+
+  /* ---------- hybrid: analyse on the hosted GPU, render here ---------- */
+  /** Range mode: fetch only start-end (source seconds) and cut it (streams). */
+  cutRange: (source: string, start: number, end: number, captions: string, language?: string) =>
+    invoke<void>('cut_range', { source, start, end, captions, language }),
+  /** Download here, upload to the hosted GPU, start it there (streams). */
+  pushJob: (source: string, llm: string, captions: string) =>
+    invoke<void>('push_job', { source, llm, captions }),
+  remoteJobs: () => invoke<RemoteJobs>('remote_jobs'),
+  /** Pull a hosted job to this machine and render it (streams pipeline-event). */
+  pullJob: (jobId: string) => invoke<void>('pull_job', { jobId }),
+
+  /* ---------- telegram delivery ---------- */
+  telegramStatus: () => invoke<TelegramStatus>('telegram_status'),
+  telegramSaveToken: (token: string) => invoke<TelegramStatus>('telegram_save_token', { token }),
+  telegramLink: () => invoke<TelegramStatus>('telegram_link'),
+  telegramSend: (jobId: string, clip: number, caption?: string) =>
+    invoke<{ ok: boolean; error?: string; as_video?: boolean; saved?: string }>('telegram_send', {
+      jobId,
+      clip,
+      caption
+    })
+}

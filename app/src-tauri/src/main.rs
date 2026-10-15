@@ -1,5 +1,5 @@
-// publikclip desktop shell. The pipeline is a Python sidecar speaking JSONL
-// on stdout (`publikclip --jsonl ...`); this shell spawns it, forwards every
+// tetclipper desktop shell. The pipeline is a Python sidecar speaking JSONL
+// on stdout (`tetclipper --jsonl ...`); this shell spawns it, forwards every
 // event to the frontend, and exposes small filesystem/settings commands.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -11,14 +11,14 @@ use std::process::{Command, Stdio};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-mod publik;
+mod secrets;
 mod update;
 
 pub(crate) fn home_dir() -> PathBuf {
-    if let Ok(custom) = std::env::var("PUBLIKCLIP_HOME") {
+    if let Ok(custom) = std::env::var("TETCLIPPER_HOME") {
         return PathBuf::from(custom);
     }
-    dirs_home().join(".publikclip")
+    dirs_home().join(".tetclipper")
 }
 
 fn dirs_home() -> PathBuf {
@@ -32,12 +32,12 @@ fn dirs_home() -> PathBuf {
 /// Where uv is allowed to create the pipeline's virtualenv.
 ///
 /// A packaged build must never let uv create `.venv` next to the bundled
-/// pipeline source: on macOS that path is `publikclip.app/Contents/Resources`,
+/// pipeline source: on macOS that path is `tetclipper.app/Contents/Resources`,
 /// inside the signed bundle, and the first write there invalidates the code
 /// signature — Gatekeeper then refuses to launch an app that opened fine a
 /// moment earlier. (Windows survives it today only because NSIS installs
 /// under LOCALAPPDATA, which happens to be writable.) Point uv at
-/// PUBLIKCLIP_HOME instead, where every other piece of mutable state already
+/// TETCLIPPER_HOME instead, where every other piece of mutable state already
 /// lives, so the bundle stays byte-identical to what was notarized.
 ///
 /// Dev builds keep using the repo's own pipeline/.venv.
@@ -70,7 +70,7 @@ pub(crate) fn quiet_command(program: &str) -> Command {
     // gives us a bare PATH with no uv on it, so tell the sidecar which uv to
     // use instead of letting it look one up by name.
     if !cfg!(debug_assertions) {
-        cmd.env("PUBLIKCLIP_UV", packaged_uv());
+        cmd.env("TETCLIPPER_UV", packaged_uv());
     }
     cmd
 }
@@ -109,14 +109,14 @@ fn pipeline_invocation() -> (String, Vec<String>) {
                 "--directory".to_string(),
                 pipeline_dir.to_string_lossy().to_string(),
                 "run".to_string(),
-                "publikclip".to_string(),
+                "tetclipper".to_string(),
             ],
         )
     } else {
         // Packaged: bundled uv + pipeline source under the platform's
         // resource layout — macOS keeps them in the .app's Resources dir,
         // Windows (NSIS) lands them in resources\ next to the exe. The venv
-        // bootstraps into PUBLIKCLIP_HOME on first run (uv handles Python
+        // bootstraps into TETCLIPPER_HOME on first run (uv handles Python
         // 3.12 download + deps; the onboarding screen owns expectations).
         let resources = packaged_resources();
         (
@@ -130,7 +130,7 @@ fn pipeline_invocation() -> (String, Vec<String>) {
                 // uv_project_environment() exists to prevent. The bundle ships
                 // a lock that matches the pyproject.toml beside it.
                 "--frozen".to_string(),
-                "publikclip".to_string(),
+                "tetclipper".to_string(),
             ],
         )
     }
@@ -138,7 +138,6 @@ fn pipeline_invocation() -> (String, Vec<String>) {
 
 #[tauri::command]
 fn run_job(app: AppHandle, source: String, llm: Option<String>, captions: Option<String>) -> Result<(), String> {
-    publik::require_linked()?;
     let (program, base_args) = pipeline_invocation();
     std::thread::spawn(move || {
         let mut args = base_args.clone();
@@ -166,7 +165,6 @@ fn resume_job(
     captions: Option<String>,
     camera: Option<String>,
 ) -> Result<(), String> {
-    publik::require_linked()?;
     let (program, base_args) = pipeline_invocation();
     std::thread::spawn(move || {
         let mut args = base_args.clone();
@@ -307,7 +305,7 @@ fn list_job_dirs() -> Result<Vec<Value>, String> {
 
 #[tauri::command]
 fn save_gemini_key(key: String) -> Result<bool, String> {
-    publik::merge_secret("gemini_api_key", json!(key.trim()))?;
+    secrets::merge_secret("gemini_api_key", json!(key.trim()))?;
     Ok(true)
 }
 
@@ -347,7 +345,7 @@ async fn check_ollama() -> Result<Value, String> {
     Ok(json!({"running": true, "models": models}))
 }
 
-/// Run `publikclip <args...>` and parse the last JSON line — the contract
+/// Run `tetclipper <args...>` and parse the last JSON line — the contract
 /// edit_tool/ig_tool/the audio_* commands all rely on (progress lines, if
 /// any, may precede the final payload).
 fn run_cli_json(args: Vec<String>) -> Result<Value, String> {
@@ -363,7 +361,7 @@ fn run_cli_json(args: Vec<String>) -> Result<Value, String> {
     match line.and_then(|l| serde_json::from_str::<Value>(l).ok()) {
         Some(v) => Ok(v),
         None => Err(format!(
-            "publikclip produced no JSON: {}",
+            "tetclipper produced no JSON: {}",
             String::from_utf8_lossy(&out.stderr).chars().take(400).collect::<String>()
         )),
     }
@@ -431,7 +429,7 @@ fn save_clip_edits(job_id: String, edits: Value) -> Result<(), String> {
 fn save_pexels_key(key: String) -> Result<bool, String> {
     // Same merge + chmod 600 path as every other key (a Pexels-first user
     // used to get the umask default here).
-    publik::merge_secret("pexels_api_key", json!(key.trim()))?;
+    secrets::merge_secret("pexels_api_key", json!(key.trim()))?;
     Ok(true)
 }
 
@@ -472,8 +470,8 @@ fn audio_keys_status() -> Result<Value, String> {
     }))
 }
 
-/// Local music/sfx library — import/list/remove, all shelling to `publikclip
-/// audio ...` like edit_tool shells to `publikclip edit ...`.
+/// Local music/sfx library — import/list/remove, all shelling to `tetclipper
+/// audio ...` like edit_tool shells to `tetclipper edit ...`.
 #[tauri::command]
 async fn audio_import(paths: Vec<String>, kind: String) -> Result<Value, String> {
     let mut args = vec!["audio".to_string(), "import".to_string()];
@@ -588,7 +586,7 @@ async fn ig_connect(app_id: String, app_secret: String) -> Result<String, String
     }
 }
 
-/// One-shot `publikclip ig <args...>` call returning the CLI's JSON line
+/// One-shot `tetclipper ig <args...>` call returning the CLI's JSON line
 /// (sync / overview / link / unlink / reject — same contract as edit_tool).
 #[tauri::command]
 async fn ig_tool(args: Vec<String>) -> Result<Value, String> {
@@ -604,7 +602,7 @@ fn export_clip(path: String, title: Option<String>) -> Result<String, String> {
         return Err("clip file missing".into());
     }
     let downloads = dirs_home().join("Downloads");
-    let stem = title.unwrap_or_else(|| "publikclip".into());
+    let stem = title.unwrap_or_else(|| "tetclipper".into());
     let safe: String = stem
         .chars()
         .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' })
@@ -646,10 +644,6 @@ fn main() {
             save_clip_edits,
             save_pexels_key,
             export_clip,
-            publik::publik_provision,
-            publik::publik_status,
-            publik::publik_refresh,
-            publik::publik_disconnect,
             update::check_update,
             save_freesound_key,
             save_jamendo_key,
@@ -667,5 +661,5 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running publikclip");
+        .expect("error while running tetclipper");
 }

@@ -5,7 +5,7 @@
   <!-- Notarization requires the hardened runtime, and the hardened runtime
        breaks this app's whole reason for existing: it ships a uv binary that
        downloads a CPython interpreter and multi-gigabyte native wheels
-       (torch, whisperx, opencv) into PUBLIKCLIP_HOME on first run, then
+       (torch, whisperx, opencv) into TETCLIPPER_HOME on first run, then
        executes them. None of that is signed by us.
 
        These are the narrowest entitlements that let that work. The app is

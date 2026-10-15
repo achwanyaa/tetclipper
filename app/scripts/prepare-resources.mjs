@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Stage the Python pipeline + a uv binary into src-tauri/resources for
 // bundling. Packaged builds run: resources/bin/uv --directory
-// resources/pipeline run publikclip — the env bootstraps on first launch.
+// resources/pipeline run tetclipper — the env bootstraps on first launch.
 //
 // Node instead of bash so the exact same script runs on macOS and Windows
 // (`beforeBuildCommand` executes under whatever shell the platform has).
@@ -67,7 +67,7 @@ function locateOnPath() {
   }
 }
 
-// Same fallback shape as pipeline/publikclip_pipeline/render/ffmpeg_bin.py's
+// Same fallback shape as pipeline/tetclipper_pipeline/render/ffmpeg_bin.py's
 // static-ffmpeg fetch: when nothing capable exists on the machine, download
 // the official static build once instead of leaving the user stuck. Here
 // that means astral-sh/uv's own released binaries, straight from GitHub —
@@ -134,7 +134,7 @@ function findBinary(dir, name) {
 async function bootstrapUv() {
   const asset = uvReleaseAsset();
   if (!asset) return null;
-  const scratch = mkdtempSync(path.join(os.tmpdir(), "publikclip-uv-"));
+  const scratch = mkdtempSync(path.join(os.tmpdir(), "tetclipper-uv-"));
   const archivePath = path.join(scratch, asset.name);
   const url = `https://github.com/astral-sh/uv/releases/latest/download/${asset.name}`;
   try {

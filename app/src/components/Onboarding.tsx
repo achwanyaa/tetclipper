@@ -1,27 +1,11 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import type { PublikStatus } from '../types'
-import {
-  LINK_STILL_REQUIRED,
-  LinkGateCard,
-  PUBLIK_DATA_PATH,
-  PUBLIK_PRE_SETUP,
-  PublikReady,
-  linkGate
-} from './PublikCard'
 
 /**
- * Three beats: what this is → pick the brain (publik API preselected, your
+ * Three beats: what this is → pick the brain (Claude Code preselected, your
  * own Gemini key, or local Ollama) → go. The optional Instagram feedback
  * module gets its own guided flow later (Settings → Connect Instagram), so
  * first-run stays under a minute.
- *
- * "Continue with publik API" is the consent moment: nothing is posted to
- * publik before that tap.
- *
- * Founder rule (2026-09-28): the flow cannot finish until this computer is
- * linked to a publik account (publik_refresh reports claimed), whichever
- * brain the user means to score with.
  */
 
 interface Props {
@@ -33,31 +17,11 @@ export default function Onboarding({ onDone }: Props) {
   const [key, setKey] = useState('')
   const [saved, setSaved] = useState(false)
   const [ollama, setOllama] = useState<{ running: boolean; models: string[] } | null>(null)
-  const [brain, setBrain] = useState<'publik' | 'gemini' | 'ollama'>('publik')
-  const [publik, setPublik] = useState<PublikStatus | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState<string | null>(null)
+  const [brain, setBrain] = useState<'claude' | 'gemini' | 'ollama'>('claude')
 
   useEffect(() => {
     api.checkOllama().then(setOllama).catch(() => setOllama({ running: false, models: [] }))
-    // A reinstall on a computer that already has a key skips the mint; ask
-    // the server whether it is linked (no key = no network call).
-    api.publikRefresh().then((p) => p.provisioned && setPublik(p)).catch(() => null)
   }, [])
-
-  async function connectPublik() {
-    setBusy(true)
-    setNote(null)
-    try {
-      setPublik(await api.publikProvision())
-    } catch (err) {
-      setNote(String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const linked = linkGate(publik) === 'linked'
 
   async function saveKey() {
     if (!key.trim()) return
@@ -70,7 +34,7 @@ export default function Onboarding({ onDone }: Props) {
       <div className="grain" />
       {step === 0 && (
         <section className="ob-step" key="s0">
-          <p className="ob-kicker">publikclip</p>
+          <p className="ob-kicker">tetclipper</p>
           <h1 className="ob-title">
             THE CLIPPER
             <br />
@@ -80,9 +44,9 @@ export default function Onboarding({ onDone }: Props) {
           </h1>
           <p className="ob-body">
             Long video in, vertical clips out. Speech, laughter, speakers, and camera
-            moves are all computed <em>on this machine</em>. The only thing that ever
-            leaves it is two or three small text calls to score your moments — and
-            every score comes with the full audit trail of how it was made.
+            moves are all computed <em>on this machine</em>. Moments are judged by
+            your own Claude Code session — no API key — and every score comes with
+            the full audit trail of how it was made.
           </p>
           <button className="btn-primary" onClick={() => setStep(1)}>
             Set it up
@@ -95,31 +59,15 @@ export default function Onboarding({ onDone }: Props) {
           <h2 className="ob-h2">Pick how moments get judged</h2>
           <div className="ob-cards">
             <div
-              className={`ob-card ${brain === 'publik' ? '' : 'dim'} ${linked ? 'done' : ''}`}
-              onClick={() => setBrain('publik')}
+              className={`ob-card ${brain === 'claude' ? '' : 'dim'}`}
+              onClick={() => setBrain('claude')}
             >
-              <h3>publik API <span className="chip chip-amber">preselected</span></h3>
-              {publik?.provisioned ? (
-                <>
-                  <button className="btn-secondary" disabled>publik API ready ✓</button>
-                  {linked ? (
-                    <PublikReady publik={publik} />
-                  ) : (
-                    <LinkGateCard publik={publik} inline onChange={setPublik} />
-                  )}
-                </>
-              ) : (
-                <>
-                  <p>{PUBLIK_PRE_SETUP}</p>
-                  <p>{PUBLIK_DATA_PATH}</p>
-                  <div className="ob-key-row">
-                    <button className="btn-secondary" onClick={connectPublik} disabled={busy}>
-                      {busy ? 'Setting up…' : 'Continue with publik API'}
-                    </button>
-                  </div>
-                </>
-              )}
-              {note && <p className="ig-message mono">{note}</p>}
+              <h3>Claude Code <span className="chip chip-amber">preselected</span></h3>
+              <p>
+                No key, no per-call cost: runs on your Claude plan. When a job reaches
+                JUDGE it pauses and hands its moments to Claude Code — run{' '}
+                <code>/score-clips</code> in your Claude Code session and the job carries on.
+              </p>
             </div>
             <div
               className={`ob-card ${brain === 'gemini' ? '' : 'dim'} ${saved ? 'done' : ''}`}
@@ -128,9 +76,8 @@ export default function Onboarding({ onDone }: Props) {
               <h3>Your own Gemini key</h3>
               <p>
                 Prefer your own Google key? Paste it here (aistudio.google.com);
-                publikclip then talks to Google directly.
+                tetclipper then talks to Google directly.
               </p>
-              <p className="ob-required">{LINK_STILL_REQUIRED}</p>
               <div className="ob-key-row">
                 <input
                   type="password"
@@ -158,21 +105,13 @@ export default function Onboarding({ onDone }: Props) {
                     ? `Running locally (${ollama.models.filter((m) => !m.includes('embed')).slice(0, 2).join(', ') || 'no chat models'}). Zero cost, fully offline — scores are labeled "local estimate" because small models judge humor less reliably.`
                     : 'Not detected. Install ollama.com and pull a model (e.g. llama3.1:8b) to run fully offline.'}
               </p>
-              <p className="ob-required">{LINK_STILL_REQUIRED}</p>
             </div>
           </div>
           <p className="ob-fine">
             You can switch per-run. Everything else — transcription, laughter
             detection, speaker tracking, rendering — is local either way.
           </p>
-          {!linked && (
-            <p className="ob-fine">
-              {publik?.provisioned
-                ? 'Link your publik account to continue.'
-                : 'Press "Continue with publik API" above, then link your publik account.'}
-            </p>
-          )}
-          <button className="btn-primary" onClick={() => setStep(2)} disabled={!linked}>
+          <button className="btn-primary" onClick={() => setStep(2)}>
             Continue
           </button>
         </section>
@@ -183,7 +122,7 @@ export default function Onboarding({ onDone }: Props) {
           <h2 className="ob-h2">First run downloads the models</h2>
           <p className="ob-body">
             About <span className="mono">2.5 GB</span> of open speech and audio models,
-            fetched once into <span className="mono">~/.publikclip</span>. An hour-long
+            fetched once into <span className="mono">~/.tetclipper</span>. An hour-long
             podcast then takes a while on-device — the progress bar never lies to you,
             and every stage checkpoints, so you can quit and resume anytime.
           </p>

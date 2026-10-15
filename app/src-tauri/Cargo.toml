@@ -1,7 +1,7 @@
 [package]
-name = "publikclip-app"
+name = "tetclipper-app"
 version = "0.2.5"
-description = "publikclip — long video in, scored vertical clips out"
+description = "tetclipper — long video in, scored vertical clips out"
 license = "AGPL-3.0-or-later"
 edition = "2021"
 

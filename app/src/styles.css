@@ -1,5 +1,5 @@
 /* ============================================================
-   publikclip — "the editing bay"
+   tetclipper — "the editing bay"
    Broadcast-monitor charcoal, signal-amber VU accents, ledger
    typography. Display: Archivo Black (same face the captions
    burn — the brand IS the captions). Body: Public Sans. Data:
@@ -1067,17 +1067,13 @@ body {
 .loop-pick-meta { display: flex; flex-direction: column; gap: 4px; font-size: 11px; min-width: 0; }
 .loop-pick-meta .mono { color: var(--amber); font-size: 12px; }
 
-/* ---------- publik API ---------- */
-.publik-ready { display: grid; gap: 10px; margin-top: 12px; }
-.publik-ready p { font-size: 14px; color: var(--dim); line-height: 1.55; }
-.publik-balance { color: var(--text) !important; font-size: 13px !important; }
-.publik-fine { font-size: 12px !important; color: var(--faint) !important; }
-.publik-link { border-color: var(--amber-dim); color: var(--amber); justify-self: start; }
-.publik-link:hover { border-color: var(--amber); }
-.publik-row { margin-bottom: 8px; }
-.publik-row .audit-label { margin-bottom: 10px; }
-.publik-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 12px; }
-.publik-banner {
+/* ---------- notices ---------- */
+.notice-link { border-color: var(--amber-dim); color: var(--amber); justify-self: start; }
+.notice-link:hover { border-color: var(--amber); }
+.notice-row { margin-bottom: 8px; }
+.notice-row .audit-label { margin-bottom: 10px; }
+.notice-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 12px; }
+.notice-banner {
   margin-top: 28px;
   max-width: 780px;
   display: flex;
@@ -1089,8 +1085,7 @@ body {
   font-size: 14px;
   line-height: 1.5;
 }
-.publik-banner .led { margin-top: 6px; flex: none; }
-.rail-balance { font-size: 11px; color: var(--dim); line-height: 1.5; margin-bottom: 8px; }
+.notice-banner .led { margin-top: 6px; flex: none; }
 .btn-link {
   font: inherit;
   background: none;
@@ -1101,8 +1096,251 @@ body {
 }
 .btn-link:hover { text-decoration: underline; }
 
-/* the link card: stands in for the run control until this computer is linked */
-.publik-gate p { color: var(--dim); margin-top: 6px; }
-.publik-gate .btn-primary { font-size: 13px; padding: 10px 18px; }
-.publik-gate-inline { margin-top: 14px; }
 .ob-required { font-size: 12px !important; color: var(--faint) !important; margin-top: 8px; }
+
+/* Claude Code brain handoff */
+.brain-cmd {
+  margin: 10px 0 4px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  user-select: all;
+}
+
+/* ---------- manual range picker ---------- */
+.rail-row { display: flex; align-items: center; }
+.rail-row .rail-job { flex: 1; min-width: 0; }
+.rail-range {
+  background: none;
+  border: 0;
+  color: var(--faint);
+  padding: 10px 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.rail-range:hover:not(:disabled) { color: var(--amber); }
+.review-range { margin-left: auto; align-self: center; }
+
+.range {
+  position: relative;
+  min-height: 100%;
+  padding: 30px 44px 60px;
+  background:
+    radial-gradient(900px 400px at 0% 0%, rgba(255, 178, 36, 0.05), transparent 55%),
+    var(--ink);
+}
+.range-body {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr);
+  gap: 36px;
+  margin-top: 28px;
+}
+.range-video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 1px solid var(--line);
+}
+.range-track {
+  position: relative;
+  height: 26px;
+  margin-top: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.range-sel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  background: rgba(255, 178, 36, 0.35);
+  border-left: 2px solid var(--amber);
+  border-right: 2px solid var(--amber);
+}
+.range-head {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  background: var(--text);
+  pointer-events: none;
+}
+.range-times {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--faint);
+}
+.range-io {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 22px;
+  margin-top: 22px;
+}
+.range-field { display: flex; align-items: center; gap: 8px; }
+.range-field input {
+  width: 96px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 15px;
+  padding: 6px 2px;
+  outline: none;
+}
+.range-field input:focus { border-bottom-color: var(--amber); }
+.range-len { font-size: 13px; color: var(--green); }
+.range-len.bad { color: var(--red); }
+.range-cut { margin-top: 26px; }
+.range-right {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100vh - 150px);
+}
+.range-find {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+  padding: 10px 12px;
+  outline: none;
+}
+.range-find:focus { border-color: var(--amber-dim); }
+.range-transcript {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 10px;
+  padding: 6px 14px 6px 0;
+  line-height: 1.75;
+  font-size: 14px;
+}
+.range-seg { margin: 0 0 12px; }
+.range-stamp {
+  font-size: 10px;
+  color: var(--faint);
+  margin-right: 10px;
+  cursor: pointer;
+}
+.range-stamp:hover { color: var(--amber); }
+.range-word { cursor: pointer; color: var(--dim); border-radius: 2px; }
+.range-word:hover { color: var(--text); background: var(--panel-2); }
+.range-word.in { color: var(--text); background: rgba(255, 178, 36, 0.16); }
+.range-word.now { color: var(--ink); background: var(--amber); }
+
+@media (max-width: 900px) {
+  .range { padding: 20px 16px 40px; }
+  .range-body { grid-template-columns: 1fr; }
+  .range-right { max-height: 60vh; }
+}
+.rail-cloud { border-top: 1px solid var(--line); }
+.rail-job-hint.always { opacity: 1; color: var(--green); }
+
+/* ---------- chat with Claude Code ---------- */
+.chat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 30px 44px 24px;
+  background:
+    radial-gradient(900px 400px at 0% 0%, rgba(255, 178, 36, 0.05), transparent 55%),
+    var(--ink);
+}
+.chat-log {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  overflow-y: auto;
+  max-width: 820px;
+  width: 100%;
+  margin: 24px auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chat-msg {
+  max-width: 82%;
+  padding: 12px 16px;
+  line-height: 1.55;
+  font-size: 14px;
+  white-space: pre-wrap;
+  border: 1px solid var(--line);
+}
+.chat-user { align-self: flex-end; background: var(--panel-2); }
+.chat-assistant { align-self: flex-start; background: var(--panel); border-left: 2px solid var(--amber); }
+.chat-error { align-self: flex-start; color: var(--red); border-color: var(--red); }
+.chat-tool { align-self: flex-start; font-size: 11px; color: var(--faint); padding-left: 4px; }
+.chat-working { color: var(--amber); }
+.chat-note { color: var(--dim); font-size: 13px; line-height: 1.6; }
+.chat-empty { margin-top: 30px; }
+.chat-examples { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.chat-open { align-self: flex-start; }
+.chat-input {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  gap: 10px;
+  max-width: 820px;
+  width: 100%;
+  margin: 16px auto 0;
+}
+.chat-input textarea {
+  flex: 1;
+  resize: none;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 14px;
+  padding: 12px 14px;
+  outline: none;
+}
+.chat-input textarea:focus { border-color: var(--amber-dim); }
+@media (max-width: 900px) {
+  .chat { padding: 20px 16px; }
+  .chat-msg { max-width: 92%; }
+}
+
+/* range mode inputs under the source box */
+.range-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; max-width: 780px; flex-wrap: wrap; }
+.range-row input {
+  width: 110px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 14px;
+  padding: 6px 2px;
+  outline: none;
+}
+.range-row input:focus { border-bottom-color: var(--amber); }
+.range-hint { font-size: 11px; color: var(--faint); }
+
+/* ---------- caption text editor (clip editor) ---------- */
+.captext { margin: 18px 0 6px; border: 1px solid var(--line); background: var(--panel); padding: 14px 16px; }
+.captext-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.captext-hint { font-size: 10px; color: var(--faint); flex: 1; }
+.captext-note { font-size: 11px; color: var(--amber); margin-top: 10px; }
+.captext-lines { margin-top: 12px; max-height: 260px; overflow-y: auto; line-height: 1.9; font-size: 14px; }
+.captext-line { margin: 0 0 4px; }
+.captext-time { font-size: 10px; color: var(--faint); margin-right: 10px; }
+.captext-word { cursor: text; border-radius: 2px; }
+.captext-word:hover { background: var(--panel-2); }
+.captext-word.fixed { color: var(--amber); border-bottom: 1px dotted var(--amber); }
+.captext-word.hidden { color: var(--faint); text-decoration: line-through; }
+.captext-input {
+  background: var(--ink);
+  border: 1px solid var(--amber);
+  color: var(--text);
+  font-size: 13px;
+  padding: 1px 4px;
+  margin-right: 4px;
+  outline: none;
+}

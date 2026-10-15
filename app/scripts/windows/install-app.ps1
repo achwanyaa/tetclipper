@@ -3,12 +3,12 @@
   silently (/S), and waits for it to finish.
 
   This is the Windows install guide's "Run the installer" step
-  (publikhq.com/publikclip/install/windows), as a script file instead of
+  (the project's Windows install guide), as a script file instead of
   inline PowerShell pasted straight into whatever shell is open.
 
   Why a file: the guide's older text was three bare PowerShell lines
   ($var assignments + Start-Process). Reported bug
-  (publikclip-windows-installer-command-not-recognized): a reader who
+  (tetclipper-windows-installer-command-not-recognized): a reader who
   reopens a terminal mid-guide -- the guide itself says to, more than once,
   after installing Rust and after installing uv -- commonly lands back in
   Command Prompt, not PowerShell. cmd.exe has no `$variable` syntax, so it
@@ -30,7 +30,7 @@
   machines ship with blocking an unsigned local script from running at all.
 
   Relative path below is intentional: the guide's workingDirectory for this
-  step is ~/publikclip/app, and this script is invoked with that as the
+  step is ~/tetclipper/app, and this script is invoked with that as the
   current directory (PowerShell's -File does not change $PWD to the
   script's own folder), matching what the three inline lines did before.
 #>

@@ -70,11 +70,41 @@ export interface JobResults {
   candidates: { count: number; effective_weights: Record<string, number>; heatmap_present: boolean } | null
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'error'
+  text: string
+  ts: number
+}
+
+export interface RemoteJobs {
+  configured: boolean
+  url?: string
+  error?: string
+  jobs: (JobSummary & { local: boolean })[]
+}
+
+export interface TelegramStatus {
+  has_token: boolean
+  chat_id: number | string | null
+  chat_name: string | null
+  bot_username: string | null
+}
+
+export interface JobTranscript {
+  media_path: string
+  duration: number
+  title: string | null
+  /** words are [text, start, end] in source seconds */
+  segments: { speaker: number; words: [string, number, number][] }[]
+}
+
 export interface JobSummary {
   id: string
   title: string | null
   ingested: boolean
   rendered: boolean
+  /** hosted (hybrid): analysed on the GPU, rendered on the user's machine */
+  pull_only?: boolean
 }
 
 export interface SetupState {
@@ -82,39 +112,11 @@ export interface SetupState {
   onboarded: boolean
 }
 
-/** publik_status: everything the UI shows about publik API — never the key. */
 export interface UpdateNotice {
   current: string
   latest: string | null
   update_available: boolean
   url: string
-}
-
-export interface PublikStatus {
-  provisioned: boolean
-  claim_state: 'anonymous' | 'claimed'
-  claim_url: string | null
-  add_credit_url: string | null
-  /** from POST /installs, shown verbatim — the app never writes its own */
-  disclosure: { version?: number; cost?: string; data_path?: string } | null
-  /** publik_refresh only: true when the gateway answered GET /wallet */
-  refreshed?: boolean
-  /** ~/.publikclip/publik-status.json, rewritten by the pipeline after every
-   *  call and by publik_refresh from GET /wallet */
-  status: {
-    balance_micros?: number | null
-    starter_micros?: number | null
-    starter_remaining_micros?: number | null
-    last_charge_micros?: number
-    claim_state?: 'anonymous' | 'claimed'
-    needs_credit?: boolean
-    disconnected?: boolean
-    reprovision?: boolean
-    error_type?: string | null
-    top_up_url?: string | null
-    message?: string | null
-    updated_at?: number
-  }
 }
 
 /* ---------- music / sfx library ---------- */

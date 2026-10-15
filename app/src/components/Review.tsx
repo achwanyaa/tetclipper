@@ -18,7 +18,10 @@ const CAMERA_MODES: [string, string][] = [
 
 interface Props {
   results: JobResults
+  initialSelected?: number
   onBack: () => void
+  onPickRange: () => void
+  onChat: () => void
   onRestyle: (captions: string, camera: string) => void
 }
 
@@ -38,13 +41,12 @@ const SIGNAL_LABELS: Record<string, string> = {
   visual: 'visual pass'
 }
 
-/** Always name the brain that scored the job: a job scored on the user's own
- *  key must never read like a publik API job. */
+/** Always name the brain that scored the job. */
 function scoredBy(score: JobResults['score']): string {
   const model = score?.model ?? '—'
   switch (score?.llm_mode) {
-    case 'publik':
-      return `scored by ${model} via publik API`
+    case 'claude':
+      return 'scored by Claude Code'
     case 'gemini':
       return `scored by ${model} via my Gemini key`
     case 'ollama':
@@ -60,11 +62,12 @@ function fmtTime(t: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-export default function Review({ results, onBack, onRestyle }: Props) {
+export default function Review({ results, initialSelected = 0, onBack, onPickRange, onChat, onRestyle }: Props) {
   const outputs = results.render?.outputs ?? []
   const clips = results.score?.clips ?? []
-  const [selected, setSelected] = useState(0)
+  const [selected, setSelected] = useState(initialSelected)
   const [exported, setExported] = useState<Record<number, string>>({})
+  const [sent, setSent] = useState<Record<number, 'sending' | 'sent' | string>>({})
   const currentPreset = results.render?.caption_preset ?? 'classic'
   const [restylePreset, setRestylePreset] = useState(currentPreset)
   const [restyleCamera, setRestyleCamera] = useState('cut')
@@ -84,6 +87,23 @@ export default function Review({ results, onBack, onRestyle }: Props) {
       `${results.ingest?.title ?? 'clip'} ${fmtTime(clip.start)}`
     )
     setExported((prev) => ({ ...prev, [out.clip]: dest }))
+  }
+
+  async function sendTelegram(out: RenderOutput, clip: Clip) {
+    setSent((prev) => ({ ...prev, [out.clip]: 'sending' }))
+    try {
+      const res = await api.telegramSend(
+        results.job_id,
+        out.clip,
+        `${results.ingest?.title ?? 'clip'} · ${fmtTime(clip.start)}`
+      )
+      setSent((prev) => ({
+        ...prev,
+        [out.clip]: !res.ok ? `✗ ${res.error}` : res.saved ? `too big for Telegram — saved to ${res.saved}` : 'sent'
+      }))
+    } catch (err) {
+      setSent((prev) => ({ ...prev, [out.clip]: `✗ ${String(err)}` }))
+    }
   }
 
   if (editing !== null) {
@@ -107,6 +127,12 @@ export default function Review({ results, onBack, onRestyle }: Props) {
       <header className="review-head">
         <button className="btn-ghost" onClick={onBack}>
           ← studio
+        </button>
+        <button className="btn-secondary review-range" onClick={onChat}>
+          ✦ CHAT
+        </button>
+        <button className="btn-secondary" onClick={onPickRange}>
+          ✂ PICK A RANGE
         </button>
         <div className="review-title-block">
           <h1 className="review-title">{results.ingest?.title ?? results.job_id}</h1>
@@ -186,8 +212,23 @@ export default function Review({ results, onBack, onRestyle }: Props) {
               <button className="btn-primary" onClick={() => doExport(pair.out!, pair.clip!)}>
                 {exported[pair.out.clip] ? 'EXPORTED ✓' : 'EXPORT MP4'}
               </button>
+              <button
+                className="btn-secondary"
+                onClick={() => sendTelegram(pair.out!, pair.clip!)}
+                disabled={sent[pair.out.clip] === 'sending'}
+                title="send this clip to your linked Telegram chat"
+              >
+                {sent[pair.out.clip] === 'sending'
+                  ? 'SENDING…'
+                  : sent[pair.out.clip] === 'sent'
+                    ? 'SENT TO TELEGRAM ✓'
+                    : '✈ TELEGRAM'}
+              </button>
               {exported[pair.out.clip] && (
                 <span className="mono export-path">{exported[pair.out.clip]}</span>
+              )}
+              {sent[pair.out.clip] && sent[pair.out.clip] !== 'sending' && sent[pair.out.clip] !== 'sent' && (
+                <span className="mono export-path">{sent[pair.out.clip]}</span>
               )}
             </div>
           </div>

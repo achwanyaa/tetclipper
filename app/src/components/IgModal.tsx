@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '../backend'
 
 /**
- * The Instagram loop, guided. Your OWN Meta app — publikclip never sees
+ * The Instagram loop, guided. Your OWN Meta app — tetclipper never sees
  * your account through anyone's server but Meta's. Steps verified against
  * Meta's Standard Access docs (no App Review needed for self-serving apps).
  */
@@ -72,7 +72,7 @@ export default function IgModal({ onClose }: Props) {
           <>
             <p className="ig-intro">
               Optional. Connect your Instagram through <em>your own</em> Meta app and
-              publikclip calibrates its virality score against how your clips actually
+              tetclipper calibrates its virality score against how your clips actually
               perform. Skip it and everything still works — you just keep the
               uncalibrated score. ~10 minutes, once.
             </p>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { openUrl } from '@tauri-apps/plugin-opener'
+import { openUrl } from '../backend'
 import { api } from '../api'
 import type { LoopClip, LoopLinked, LoopOverview, LoopUnlinked } from '../types'
 import IgModal from './IgModal'

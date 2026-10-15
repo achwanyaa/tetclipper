@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { open } from '@tauri-apps/plugin-dialog'
-import { listen } from '@tauri-apps/api/event'
+import { listen, openDialog as open } from '../backend'
 import { api } from '../api'
 import type { AudioKeysStatus, LibraryItem, OnlineAudioResult } from '../types'
 
@@ -93,7 +92,7 @@ export default function AudioPanel({ onClose, onLibraryChanged }: Props) {
     if (!picked) return
     setImporting(true)
     try {
-      await api.audioImport([picked as string], 'auto')
+      await api.audioImport(Array.isArray(picked) ? picked : [picked], 'auto')
       reloadLibrary()
       onLibraryChanged()
     } finally {
@@ -234,7 +233,7 @@ export default function AudioPanel({ onClose, onLibraryChanged }: Props) {
                   draggable
                   title="drag onto the audio track"
                   onDragStart={(e) => {
-                    e.dataTransfer.setData('application/x-publikclip-audio', JSON.stringify(it))
+                    e.dataTransfer.setData('application/x-tetclipper-audio', JSON.stringify(it))
                     e.dataTransfer.effectAllowed = 'copy'
                   }}
                 >

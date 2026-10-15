@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { invoke, listen } from '../backend'
 import { api } from '../api'
 import AudioPanel from './AudioPanel'
+import CaptionText from './CaptionText'
 import type { AudioItem, LibraryItem } from '../types'
 
 /**
@@ -26,6 +26,7 @@ interface EditState {
   remove_dead_space: boolean; disabled_cuts: number[]
   overlays: OverlayItem[]
   audio: AudioItem[]
+  word_edits?: Record<string, string>
 }
 interface EditContext {
   ok: boolean
@@ -66,6 +67,8 @@ export default function ClipEditor({ jobId, clipIndex, onClose, onRendered }: Pr
   const [renderMsg, setRenderMsg] = useState('')
   const [suggesting, setSuggesting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [proofreading, setProofreading] = useState(false)
+  const [proofNote, setProofNote] = useState<string | null>(null)
   const [selectedOverlay, setSelectedOverlay] = useState<string | null>(null)
   const [selectedAudio, setSelectedAudio] = useState<string | null>(null)
   const [showLibrary, setShowLibrary] = useState(false)
@@ -366,6 +369,30 @@ export default function ClipEditor({ jobId, clipIndex, onClose, onRendered }: Pr
     await invoke('run_edit_render', { jobId, clip: clipIndex })
   }
 
+  async function doProofread() {
+    if (!edit) return
+    await invoke('save_clip_edits', { jobId, edits: { [String(clipIndex)]: edit } })
+    setProofreading(true)
+    setProofNote(null)
+    try {
+      const res = await invoke<{ ok: boolean; edit?: EditState; changed?: number; error?: string }>('edit_tool', {
+        args: ['proofread', jobId, String(clipIndex)]
+      })
+      if (res.ok && res.edit) {
+        setEdit(res.edit)
+        setProofNote(
+          res.changed
+            ? `Claude fixed ${res.changed} word${res.changed === 1 ? '' : 's'} (amber). Right-click one to undo it, then RE-RENDER CLIP.`
+            : 'Claude found nothing to fix.'
+        )
+      } else setProofNote(res.error ?? 'Proofreading failed.')
+    } catch (e) {
+      setProofNote(String(e))
+    } finally {
+      setProofreading(false)
+    }
+  }
+
   async function doSuggest(prefer: string) {
     if (!edit) return
     await invoke('save_clip_edits', { jobId, edits: { [String(clipIndex)]: edit } })
@@ -424,7 +451,7 @@ export default function ClipEditor({ jobId, clipIndex, onClose, onRendered }: Pr
     e.preventDefault()
     setAudioDropHover(false)
     if (!edit) return
-    const raw = e.dataTransfer.getData('application/x-publikclip-audio')
+    const raw = e.dataTransfer.getData('application/x-tetclipper-audio')
     if (!raw) return
     let lib: LibraryItem
     try {
@@ -565,6 +592,15 @@ export default function ClipEditor({ jobId, clipIndex, onClose, onRendered }: Pr
           ✂ remove dead space
         </button>
       </div>
+
+      <CaptionText
+        words={ctx.words.filter((w) => w.start >= edit.start && w.start < edit.end)}
+        edits={edit.word_edits ?? {}}
+        onChange={(next) => persist({ ...edit, word_edits: next })}
+        onProofread={doProofread}
+        proofreading={proofreading}
+        note={proofNote}
+      />
 
       {/* timeline */}
       <div

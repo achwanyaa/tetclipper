@@ -1,15 +1,13 @@
-// "A newer publikclip is out": one GET to GitHub's latest-release endpoint on
-// launch, compared with the version compiled into this binary. publikclip has
-// no self-updater, so without this a person on an old build never learns a
-// fix shipped (the 0.2.2 builds kept showing a stale "$0.25 free" line for
-// hours after the server had changed, 2026-09-28). Offline or rate-limited,
+// "A newer build is out": one GET to GitHub's latest-release endpoint on
+// launch, compared with the version compiled into this binary. The repo comes
+// from TETCLIPPER_RELEASES_REPO ("owner/name") at build time; without it there
+// is no release channel and the check stays silent. Offline or rate-limited,
 // it says nothing: a missing notice is never an error.
 use serde_json::{json, Value};
 
-use crate::publik::curl_request;
+use crate::secrets::curl_request;
 
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/Blueturboguy07/publikclip/releases/latest";
-const RELEASES_PAGE: &str = "https://github.com/Blueturboguy07/publikclip/releases/latest";
+const RELEASES_REPO: Option<&str> = option_env!("TETCLIPPER_RELEASES_REPO");
 
 /// "v0.2.3" or "0.2.3" -> (0, 2, 3). Anything else is None, so a tag that
 /// is not a version can never look newer.
@@ -41,15 +39,17 @@ pub(crate) fn notice_from(current: &str, release: &Value) -> Value {
         "current": current,
         "latest": if tag.is_empty() { Value::Null } else { json!(tag.trim_start_matches('v')) },
         "update_available": available,
-        "url": if available { release["html_url"].as_str().unwrap_or(RELEASES_PAGE) } else { RELEASES_PAGE },
+        "url": release["html_url"].as_str().unwrap_or(""),
     })
 }
 
 #[tauri::command]
 pub async fn check_update() -> Result<Value, String> {
     let current = env!("CARGO_PKG_VERSION");
-    let quiet = json!({ "current": current, "latest": Value::Null, "update_available": false, "url": RELEASES_PAGE });
-    match curl_request("GET", LATEST_RELEASE_URL, None, None, 8) {
+    let quiet = json!({ "current": current, "latest": Value::Null, "update_available": false, "url": "" });
+    let Some(repo) = RELEASES_REPO else { return Ok(quiet) };
+    let latest = format!("https://api.github.com/repos/{repo}/releases/latest");
+    match curl_request("GET", &latest, None, None, 8) {
         Ok((200, body)) => Ok(notice_from(current, &body)),
         _ => Ok(quiet),
     }
