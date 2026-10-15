@@ -647,6 +647,10 @@ async def upload(request: Request, name: str) -> dict:
     return {"path": str(dest)}
 
 
+from . import studio as _studio  # noqa: E402 — registers the studio_* commands
+
+if _studio.STUDIO_DIST.exists():
+    app.mount("/studio", StaticFiles(directory=_studio.STUDIO_DIST, html=True), name="studio")
 if DIST_DIR.exists():
     app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="ui")
 

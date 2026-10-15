@@ -130,6 +130,7 @@ export const clipSpecSchema = z.object({
 export type Word = z.infer<typeof wordSchema>
 export type CropKeyframe = z.infer<typeof cropKeyframeSchema>
 export type Effect = z.infer<typeof effectSchema>
+export type EffectInput = z.input<typeof effectSchema>
 export type Cut = z.infer<typeof cutSchema>
 export type ClipSpec = z.infer<typeof clipSpecSchema>
 export type ClipSpecInput = z.input<typeof clipSpecSchema>
