@@ -1,7 +1,8 @@
 # Vendored code provenance
 
-publikclip is AGPL-3.0-or-later. It adapts code, models, and fonts from the
-following projects. Vendored files carry an attribution header pointing back
+tetclipper is AGPL-3.0-or-later. It is a modified version of publikclip
+(https://github.com/Blueturboguy07/publikclip, AGPL-3.0-or-later), and it adapts
+code, models, and fonts from the following projects. Vendored files carry an attribution header pointing back
 here. "Adapted" = algorithm/constants faithfully ported into our structures;
 "Vendored" = file taken near-verbatim.
 

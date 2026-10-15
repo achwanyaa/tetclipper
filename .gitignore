@@ -16,7 +16,7 @@ app/src-tauri/target/
 app/dist/
 
 # Local data — never commit media, models, or job artifacts
-.publikclip/
+.tetclipper/
 *.mp4
 *.wav
 *.mkv
@@ -33,3 +33,6 @@ secrets.json
 .env
 .env.*
 *.log
+
+# per-machine deployment pointer
+.claude/deploy-url.txt

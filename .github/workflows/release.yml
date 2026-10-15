@@ -3,10 +3,9 @@
 #
 # Until this existed, windows.yml built a fully tested installer on every push
 # and then threw it away as an expiring CI artifact, and no macOS build ran at
-# all -- which is why publikclip had no download on publikhq.com.
+# all.
 #
-# Secrets this needs on THIS repo (publik has the notarization half; the
-# certificate half lives only in NitroAI so far):
+# Secrets this needs on this repo:
 #     APPLE_CERTIFICATE            base64 of the Developer ID .p12
 #     APPLE_CERTIFICATE_PASSWORD   its export passphrase
 #     APPLE_SIGNING_IDENTITY       "Developer ID Application: Mann Bellani (R5R3ZS54LV)"
@@ -15,7 +14,7 @@
 #     APPLE_TEAM_ID                R5R3ZS54LV
 #
 # It refuses to publish rather than quietly shipping an unsigned build: an
-# unsigned dmg is the "publikclip is damaged and can't be opened" bug, and
+# unsigned dmg is the "tetclipper is damaged and can't be opened" bug, and
 # shipping that is worse than shipping nothing.
 name: release
 
@@ -121,7 +120,7 @@ jobs:
           xattr -w com.apple.quarantine "0083;00000000;Safari;" "$STAGE/download.dmg"
           spctl --assess --type open --context context:primary-signature -vv "$STAGE/download.dmg" || FAIL=1
           hdiutil attach "$STAGE/download.dmg" -mountpoint "$STAGE/m" -nobrowse -readonly -quiet
-          cp -R "$STAGE/m/publikclip.app" "$STAGE/app.app"
+          cp -R "$STAGE/m/tetclipper.app" "$STAGE/app.app"
           hdiutil detach "$STAGE/m" -quiet
           xattr -w com.apple.quarantine "0083;00000000;Safari;" "$STAGE/app.app"
           spctl --assess --type execute -vv "$STAGE/app.app" || FAIL=1
@@ -140,7 +139,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 90
     env:
-      PUBLIKCLIP_HOME: ${{ github.workspace }}\.publikclip-home
+      TETCLIPPER_HOME: ${{ github.workspace }}\.tetclipper-home
     steps:
       - uses: actions/checkout@v4
         with:
@@ -184,6 +183,6 @@ jobs:
           find dist -type f \( -name '*.dmg' -o -name '*.exe' \) -print
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-                 --title "publikclip $TAG" --generate-notes
+                 --title "tetclipper $TAG" --generate-notes
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             $(find dist -type f \( -name '*.dmg' -o -name '*.exe' \))

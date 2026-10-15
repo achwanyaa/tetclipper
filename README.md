@@ -1,8 +1,8 @@
-# publikclip
+# tetclipper
 
 **Long video in. Scored vertical clips out. Everything runs on your machine.**
 
-publikclip is an open-source (AGPL-3.0) desktop app that takes a YouTube URL or a
+tetclipper is an open-source (AGPL-3.0) desktop app that takes a YouTube URL or a
 horizontal video file and produces vertical 9:16 clips with:
 
 - **Smart camera** — active-speaker-tracked crop paths, smoothed motion, hard cuts
@@ -21,17 +21,25 @@ horizontal video file and produces vertical 9:16 clips with:
 
 Every model — speech recognition, forced alignment, diarization, laughter
 detection, audio tagging, face detection, active-speaker detection — runs
-locally. The only network calls are the video download and 2–3 small LLM calls
-(publik API by default — no key to paste; or bring your own Gemini key, or run
-fully local via Ollama at reduced scoring quality).
+locally (or on your own Modal GPU, see below). Moments are judged by your own
+Claude Code session — no API key: a job pauses at JUDGE and `/score-clips`
+answers it. Your own Gemini key or a local Ollama model also work.
+
+Beyond the auto-found moments:
+
+- **Range mode** — give a link and exact minutes (12:30–13:15); only that slice
+  is downloaded, transcribed and cut.
+- **Chat** — describe the cut in words ("the part about Goliath, under a
+  minute, hormozi captions") and Claude Code finds and cuts it.
+- **Caption editing** — fix any word, or let Claude proofread the captions.
+- **Telegram delivery** — send finished clips to your own bot.
 
 ## Status
 
 Working end to end: hour-long podcast in, rendered/captioned/scored 9:16 clips
 out, validated on real footage. The Instagram feedback loop ships in-app
 (sync, clip↔Reel matching, snapshot history, automatic score calibration).
-Builds are currently unsigned — install from source below, or follow the
-guided install at [publikhq.com/publikclip](https://publikhq.com/publikclip).
+Builds are currently unsigned — install from source below.
 
 Runs on macOS (Apple silicon) and Windows 10/11 x64. The Windows path is
 validated on every push by the `windows` workflow: env resolve, full test
@@ -41,7 +49,7 @@ clean VM.
 ## Music & SFX
 
 Every clip gets its own music/sfx track, backed by a local library at
-`~/.publikclip/audio/` (files copied in, plus an index of tags/bpm/licence).
+`~/.tetclipper/audio/` (files copied in, plus an index of tags/bpm/licence).
 The library starts empty — fill it from your own files, or pull
 Creative-Commons tracks from Freesound/Jamendo straight from the app.
 
@@ -82,17 +90,17 @@ You need four tools: git, [Node](https://nodejs.org), [Rust](https://rustup.rs),
 and [uv](https://docs.astral.sh/uv/). Then:
 
 ```sh
-git clone https://github.com/Blueturboguy07/publikclip.git
-cd publikclip/app
+git clone <your tetclipper repo URL>
+cd tetclipper/app
 npm install
 npx tauri build --bundles app
-ditto src-tauri/target/release/bundle/macos/publikclip.app /Applications/publikclip.app
-open /Applications/publikclip.app
+ditto src-tauri/target/release/bundle/macos/tetclipper.app /Applications/tetclipper.app
+open /Applications/tetclipper.app
 ```
 
 The app downloads its speech/audio models (~4–5 GB) on first run with a
 progress UI, and fetches a caption-capable static ffmpeg automatically if the
-machine has none. Scoring runs on publik API by default; your own Gemini API
+machine has none. Scoring runs on Claude Code by default; your own Gemini API
 key or a local Ollama model (reduced scoring quality) are one tap away in
 onboarding.
 
@@ -104,8 +112,8 @@ with C++** build tools, [Node](https://nodejs.org), git, and
 Then, in PowerShell:
 
 ```powershell
-git clone https://github.com/Blueturboguy07/publikclip.git
-cd publikclip\app
+git clone <your tetclipper repo URL>
+cd tetclipper\app
 npm.cmd install
 node_modules\.bin\tauri.cmd build --bundles nsis
 # run the installer it produces:
@@ -120,12 +128,21 @@ bar, and a caption-capable static ffmpeg is fetched automatically.
 ```sh
 # pipeline
 cd pipeline && uv sync --group dev --group pipeline && uv run pytest
-uv run publikclip run "https://www.youtube.com/watch?v=..."
+uv run tetclipper run "https://www.youtube.com/watch?v=..."
 
-# pick the brain per run: --llm publik (default) | gemini | ollama
-# publik API from a terminal, no GUI: PUBLIK_API_KEY=pk_live_... (optional
-# PUBLIK_API_BASE_URL, default https://publikhq.com/api/v1); own key:
-# PUBLIKCLIP_GEMINI_API_KEY=AIza...
+# pick the brain per run: --llm claude (default) | gemini | ollama
+# own Gemini key from a terminal: TETCLIPPER_GEMINI_API_KEY=AIza...
+
+# browser UI + API (instead of the desktop app)
+uv run --group server tetclipper serve        # http://localhost:8765
+
+# range mode: only 12:30-13:15 of a video, cut on this machine
+uv run tetclipper cut "https://youtu.be/..." 12:30 13:15 --captions hormozi --language en
+
+# hosted GPU (Modal): analyse there, render here
+modal deploy modal_app.py
+uv run tetclipper push "https://youtu.be/..."     # download here, analyse on Modal
+uv run tetclipper pull <job_id> --render          # bring it back, render here
 
 # app
 cd app && npm install && npm run tauri dev

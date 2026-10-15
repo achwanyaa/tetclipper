@@ -3,7 +3,7 @@
 # ffmpeg, pass the pipeline test suite, build the .app and .dmg, then mount
 # the dmg and launch the app out of it.
 #
-# This job did not exist until now, which is why publikclip has never had a
+# This job did not exist until now, which is why tetclipper has never had a
 # dmg: the mac packaging path (tauri.conf targets ["dmg"], the packaged branch
 # in main.rs, prepare-resources.mjs staging bin/uv) was all written, but
 # nothing ever built it.
@@ -20,7 +20,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 90
     env:
-      PUBLIKCLIP_HOME: ${{ github.workspace }}/.publikclip-home
+      TETCLIPPER_HOME: ${{ github.workspace }}/.tetclipper-home
     steps:
       - uses: actions/checkout@v4
 
@@ -46,8 +46,8 @@ jobs:
       - name: Fetch caption-capable ffmpeg
         working-directory: pipeline
         run: |
-          uv run python -c "from publikclip_pipeline.render import ffmpeg_bin; ok = ffmpeg_bin.ensure_capable(); print('resolved:', ffmpeg_bin.resolve()); assert ok, 'no subtitles-capable ffmpeg on macOS'"
-          echo "PUBLIKCLIP_FFMPEG=$PUBLIKCLIP_HOME/bin/ffmpeg" >> "$GITHUB_ENV"
+          uv run python -c "from tetclipper_pipeline.render import ffmpeg_bin; ok = ffmpeg_bin.ensure_capable(); print('resolved:', ffmpeg_bin.resolve()); assert ok, 'no subtitles-capable ffmpeg on macOS'"
+          echo "TETCLIPPER_FFMPEG=$TETCLIPPER_HOME/bin/ffmpeg" >> "$GITHUB_ENV"
 
       - name: Pipeline test suite
         working-directory: pipeline
@@ -65,7 +65,7 @@ jobs:
         # either regresses, the bundle grows by gigabytes and — once we sign —
         # the first launch invalidates its own signature.
         run: |
-          APP=app/src-tauri/target/release/bundle/macos/publikclip.app
+          APP=app/src-tauri/target/release/bundle/macos/tetclipper.app
           RES="$APP/Contents/Resources/resources"
           test -x "$RES/bin/uv" || { echo "::error::bundled uv missing from $RES/bin"; exit 1; }
           test -f "$RES/pipeline/pyproject.toml" || { echo "::error::pipeline source missing from bundle"; exit 1; }
@@ -78,16 +78,16 @@ jobs:
         run: |
           DMG=$(ls app/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
           echo "dmg: $DMG ($(du -h "$DMG" | cut -f1))"
-          hdiutil attach "$DMG" -mountpoint /Volumes/publikclip-ci -nobrowse -quiet
-          cp -R /Volumes/publikclip-ci/publikclip.app /tmp/publikclip.app
-          hdiutil detach /Volumes/publikclip-ci -quiet
+          hdiutil attach "$DMG" -mountpoint /Volumes/tetclipper-ci -nobrowse -quiet
+          cp -R /Volumes/tetclipper-ci/tetclipper.app /tmp/tetclipper.app
+          hdiutil detach /Volumes/tetclipper-ci -quiet
           # Ask the bundle for its executable rather than guessing: the
-          # Rust crate is publikclip-app, the product is publikclip, and the
+          # Rust crate is tetclipper-app, the product is tetclipper, and the
           # two names differ.
           BIN=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" \
-            /tmp/publikclip.app/Contents/Info.plist)
+            /tmp/tetclipper.app/Contents/Info.plist)
           echo "executable: $BIN"
-          "/tmp/publikclip.app/Contents/MacOS/$BIN" >/tmp/app.log 2>&1 &
+          "/tmp/tetclipper.app/Contents/MacOS/$BIN" >/tmp/app.log 2>&1 &
           PID=$!
           sleep 15
           if ! kill -0 "$PID" 2>/dev/null; then
@@ -100,6 +100,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: publikclip-macos-dmg
+          name: tetclipper-macos-dmg
           path: app/src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
