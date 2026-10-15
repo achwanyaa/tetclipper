@@ -194,35 +194,6 @@ def _net_ready(args: argparse.Namespace) -> bool:
     return False
 
 
-    emit("env", -1, "Installing pipeline dependencies (one-time setup)…")
-    pipeline_dir = Path(__file__).resolve().parent.parent
-    uv_bin = _uv_binary()
-    try:
-        proc = subprocess.run(
-            # --frozen for the same reason main.rs passes it: in a packaged
-            # build pipeline_dir is inside the app bundle, and re-locking
-            # would write uv.lock there. UV_PROJECT_ENVIRONMENT (set by the
-            # shell that spawned us) keeps the venv itself out too.
-            [uv_bin, "--directory", str(pipeline_dir), "sync", "--frozen", "--group", "pipeline"],
-            capture_output=True,
-            text=True,
-            timeout=3600,
-        )
-    except Exception as err:  # noqa: BLE001 — surface, don't crash silently
-        return False, f"could not start `uv sync --group pipeline`: {err}"
-
-    if proc.returncode != 0:
-        tail = "\n".join((proc.stderr or proc.stdout or "").strip().splitlines()[-12:])
-        return False, tail or f"`uv sync --group pipeline` exited {proc.returncode}"
-
-    try:
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text("ok")
-    except OSError:
-        pass  # best-effort cache; a missing marker just re-syncs (fast, no-op) next run
-    return True, None
-
-
 def cmd_run(args: argparse.Namespace) -> int:
     source = args.source
     source_type = "url" if source.startswith(("http://", "https://")) else "file"
@@ -478,15 +449,21 @@ def _run_range(job: queue.Job, jsonl: bool, captions: str | None = None, camera:
         queue.set_job_status(job.id, "running")  # run_stages says done; the cut is still to come
         offset = float(results["ingest"].get("section_offset", 0.0))
         job = queue.get_job(job.id) or job
-        render = job.dir / "render.json"
-        existing = json.loads(render.read_text())["data"]["outputs"] if render.exists() else []
-        if existing:
-            entry = existing[0]
+        # Studio: a range job ends at a clip spec (previewed live, rendered by
+        # Remotion) instead of an ffmpeg render. Re-runs reuse the clip/spec.
+        from .spec import build as spec_build
+        from .spec import store as spec_store
+
+        clips = spec_store.list_clips(job.dir)
+        if clips:
+            idx = clips[0]
         else:
-            entry = manual.add_range(
-                job, start - offset, end - offset, lambda f, m: emit("render", f, m),
-                caption_preset=captions, camera_mode=camera,
-            )
+            idx = manual.add_range(
+                job, start - offset, end - offset, lambda f, m: emit("spec", f, m),
+                caption_preset=captions, camera_mode=camera, render=False,
+            )["clip_index"]
+        spec_build.build(job.dir, idx, style=captions, emit=lambda f, m: emit("spec", f, m))
+        entry = {"clip_index": idx, "spec": str(spec_store.spec_path(job.dir, idx))}
     except Exception as err:  # noqa: BLE001 — every failure must reach the app
         failed = queue.get_job(job.id)
         error = failed.error if failed and failed.error else str(err)
@@ -877,7 +854,7 @@ def main(argv: list[str] | None = None) -> int:
     p_cut.add_argument("source", help="YouTube URL or local video file")
     p_cut.add_argument("start", type=_parse_clock, help="e.g. 12:30")
     p_cut.add_argument("end", type=_parse_clock, help="e.g. 13:15")
-    p_cut.add_argument("--captions", choices=["classic", "beast", "hormozi", "minimal", "karaoke-pop"], default=None)
+    p_cut.add_argument("--captions", choices=["classic", "beast", "hormozi", "minimal", "karaoke-pop", "sermon", "one-word", "boxed", "neon"], default=None)
     p_cut.add_argument("--camera", choices=["cut", "pan", "locked"], default=None)
     p_cut.add_argument("--language", default="auto", help="speech language: en, sw, … or auto")
     p_cut.set_defaults(fn=cmd_cut)
@@ -925,6 +902,10 @@ def main(argv: list[str] | None = None) -> int:
     p_as.add_argument("job_id")
     p_as.add_argument("clip", type=int)
     p_edit.set_defaults(fn=cmd_edit)
+
+    from .spec import cli as spec_cli
+
+    spec_cli.add_parser(sub)
 
     p_ig = sub.add_parser("ig", help="Instagram feedback loop (your own Meta app)")
     ig_sub = p_ig.add_subparsers(dest="ig_cmd", required=True)

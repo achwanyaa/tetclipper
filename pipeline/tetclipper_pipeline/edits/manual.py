@@ -127,8 +127,11 @@ def add_range(
     emit,
     caption_preset: str | None = None,
     camera_mode: str | None = None,
+    render: bool = True,
 ) -> dict:
-    """Append the range as a clip and render it. Returns the render entry."""
+    """Append the range as a clip and render it. Returns the render entry, or
+    with render=False (Studio: the clip is previewed/rendered from its spec)
+    {"clip_index": n} without touching ffmpeg."""
     job_dir = Path(job.dir)
     missing = [s for s in ("ingest", "diarize", "events") if not (job_dir / f"{s}.json").exists()]
     if missing:
@@ -165,5 +168,7 @@ def add_range(
     edits[str(clip_idx)] = edit
     store.save(job_dir, edits)
 
+    if not render:
+        return {"clip_index": clip_idx, "start": start, "end": end}
     emit(-1, f"Cutting {_fmt(start)}–{_fmt(end)}…")
     return render_clip_edit(job_dir, clip_idx, emit)

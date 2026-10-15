@@ -14,7 +14,7 @@ const bin = path.resolve('../node_modules/.bin', process.platform === 'win32' ? 
 for (const style of STYLES) {
   execFileSync(
     bin,
-    ['still', 'src/entry.ts', `Style-${style}`, path.join(outDir, `${style}.png`), `--frame=${frame}`, '--scale=0.33'],
+    ['still', 'src/dev/entry.ts', `Style-${style}`, path.join(outDir, `${style}.png`), `--frame=${frame}`, '--scale=0.33'],
     { stdio: 'inherit', shell: process.platform === 'win32' }
   )
 }

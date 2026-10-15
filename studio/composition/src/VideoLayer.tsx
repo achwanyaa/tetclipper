@@ -2,8 +2,9 @@ import { AbsoluteFill, Easing, OffthreadVideo, Sequence, interpolate, useVideoCo
 import type { ClipSpec } from './spec'
 import { type Timeline, useSourceTime } from './timeline'
 
-/** Crop centre/zoom at source time t. Keyframes ease into each other unless the
- *  next keyframe is marked `cut`, in which case the previous one holds and jumps. */
+/** Crop centre/zoom at source time t. Keyframes interpolate linearly (the
+ *  pipeline's camera path is already smoothed and simplified to keyframes)
+ *  unless the next keyframe is marked `cut`: then the previous one holds and jumps. */
 export function cropAt(spec: ClipSpec, t: number) {
   const kfs = spec.crop.keyframes
   if (kfs.length === 0) return { x: 0.5, y: 0.5, zoom: 1 }
@@ -13,7 +14,7 @@ export function cropAt(spec: ClipSpec, t: number) {
     const b = kfs[i]
     if (t >= b.t) continue
     if (b.cut || b.t <= a.t) return a
-    const p = Easing.inOut(Easing.quad)((t - a.t) / (b.t - a.t))
+    const p = (t - a.t) / (b.t - a.t)
     return { x: a.x + (b.x - a.x) * p, y: a.y + (b.y - a.y) * p, zoom: a.zoom + (b.zoom - a.zoom) * p }
   }
   return kfs[kfs.length - 1]
