@@ -132,7 +132,7 @@ export function App() {
     }
   }, [open])
 
-  const startCut = useCallback(async (args: { source: string; start: number; end: number; captions: string; language: string }) => {
+  const startCut = useCallback(async (args: { source: string; start: number; end: number; captions: string; language: string; cloud: boolean }) => {
     setRun({ kind: 'cut', fraction: 0, message: 'Starting…' })
     try {
       await invoke('studio_cut', args)

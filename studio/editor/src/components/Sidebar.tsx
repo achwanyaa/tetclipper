@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CAPTION_STYLES, PRESETS } from '@tetclipper/composition'
-import { fmt, parseClock, type JobSummary } from '../api'
+import { fmt, invoke, parseClock, type JobSummary } from '../api'
 import type { Run } from '../App'
 
 interface Props {
@@ -8,7 +8,7 @@ interface Props {
   open: { jobId: string; clip: number } | null
   run: Run | null
   onOpen: (jobId: string, clip: number) => void
-  onCut: (args: { source: string; start: number; end: number; captions: string; language: string }) => void
+  onCut: (args: { source: string; start: number; end: number; captions: string; language: string; cloud: boolean }) => void
   onDismissRun: () => void
 }
 
@@ -18,6 +18,14 @@ export function Sidebar({ jobs, open, run, onOpen, onCut, onDismissRun }: Props)
   const [to, setTo] = useState('')
   const [style, setStyle] = useState('hormozi')
   const [language, setLanguage] = useState('en')
+  const [cloudOk, setCloudOk] = useState(false)
+  const [cloud, setCloud] = useState(true)
+
+  useEffect(() => {
+    invoke<{ cloud: boolean }>('studio_info')
+      .then((i) => setCloudOk(i.cloud))
+      .catch(() => setCloudOk(false))
+  }, [])
 
   const start = parseClock(from)
   const end = parseClock(to)
@@ -35,7 +43,7 @@ export function Sidebar({ jobs, open, run, onOpen, onCut, onDismissRun }: Props)
         className="newclip"
         onSubmit={(e) => {
           e.preventDefault()
-          if (valid && !busy) onCut({ source: source.trim(), start, end, captions: style, language })
+          if (valid && !busy) onCut({ source: source.trim(), start, end, captions: style, language, cloud: cloudOk && cloud })
         }}
       >
         <label>New clip</label>
@@ -58,6 +66,10 @@ export function Sidebar({ jobs, open, run, onOpen, onCut, onDismissRun }: Props)
             <option value="auto">auto</option>
           </select>
         </div>
+        <select value={cloudOk && cloud ? 'cloud' : 'local'} onChange={(e) => setCloud(e.target.value === 'cloud')} disabled={!cloudOk} title="where transcription + camera run">
+          <option value="cloud">Analyse on cloud GPU</option>
+          <option value="local">Analyse on this PC</option>
+        </select>
         <button className="primary" disabled={!valid || busy}>
           {busy ? 'Working…' : Number.isFinite(length) && length > 0 ? `Cut ${fmt(length)}` : 'Cut'}
         </button>

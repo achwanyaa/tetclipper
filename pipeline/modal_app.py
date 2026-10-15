@@ -1,7 +1,12 @@
-"""tetclipper on Modal: the web shell + pipeline in one GPU container.
+"""tetclipper on Modal: the web shell + pipeline, plus the Studio functions.
 
     modal secret create tetclipper-web TETCLIPPER_WEB_TOKEN=<random>
     modal deploy pipeline/modal_app.py        # prints the https URL
+
+Studio (driven from the PC by tetclipper_pipeline/cloud/client.py):
+  analyze  T4 GPU: ASR → diarize → events → camera → clip spec for a range
+           whose download/ingest the PC uploaded to the volume
+  render   16 CPUs, node + Chromium: Remotion-renders a clip spec to mp4
 
 Everything mutable (models, jobs, clips, secrets.json, llm-cache) lives on
 the `tetclipper-home` Volume, mounted as TETCLIPPER_HOME. The browser UI is
@@ -56,6 +61,30 @@ image = (
 )
 
 
+# Remotion render box: node 22 + Chromium (headless shell) + the studio
+# workspace, with the composition pre-bundled at build time.
+CHROME_DEPS = [
+    "libnss3", "libdbus-1-3", "libatk1.0-0", "libgbm-dev", "libasound2", "libxrandr2",
+    "libxkbcommon-dev", "libxfixes3", "libxcomposite1", "libxdamage1", "libatk-bridge2.0-0",
+    "libpango-1.0-0", "libcairo2", "libcups2", "fonts-noto-color-emoji", "fonts-noto-core",
+]
+render_image = (
+    modal.Image.from_registry("node:22-bookworm-slim", add_python="3.12")
+    .apt_install(*CHROME_DEPS)
+    .add_local_dir(
+        str(REPO / "studio"), remote_path="/root/studio", copy=True,
+        ignore=["**/node_modules/**", "**/dist/**", "**/public/**", "**/out/**", "editor/src/**"],
+    )
+    .run_commands(
+        "cd /root/studio && npm ci --no-audit --no-fund",
+        "cd /root/studio/composition && npx remotion browser ensure",
+        "cd /root/studio/composition && node scripts/bundle.mjs /root/bundle",
+    )
+    .env({"TETCLIPPER_BUNDLE": "/root/bundle", "PYTHONPATH": "/root"})
+    .add_local_dir(str(HERE / "tetclipper_pipeline"), remote_path="/root/tetclipper_pipeline")
+)
+
+
 def _mark_deps_synced() -> None:
     """The CLI syncs its uv groups on first run; the image already has them."""
     for marker in (".pipeline_deps_synced", ".net_deps_synced"):
@@ -95,3 +124,38 @@ def web():
     from tetclipper_pipeline.server.app import app as fastapi_app
 
     return fastapi_app
+
+
+def _in_root() -> None:
+    import sys
+
+    os.chdir("/root")
+    if sys.path[0] != "/root":
+        sys.path.insert(0, "/root")
+
+
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=40 * 60, cpu=8.0, memory=16384)
+def analyze(row: dict, start: float, end: float, captions: str | None = None):
+    """Studio range job → clip spec (generator of progress events)."""
+    _in_root()
+    _mark_deps_synced()
+    volume.reload()
+    from tetclipper_pipeline.cloud import remote
+
+    try:
+        yield from remote.analyze(row, start, end, captions)
+    finally:
+        volume.commit()
+
+
+@app.function(image=render_image, volumes={HOME: volume}, timeout=30 * 60, cpu=16.0, memory=16384)
+def render(job_dir: str, clip: int):
+    """Remotion-render one clip spec (generator of progress events)."""
+    _in_root()
+    volume.reload()
+    from tetclipper_pipeline.cloud import remote
+
+    try:
+        yield from remote.render(job_dir, clip)
+    finally:
+        volume.commit()

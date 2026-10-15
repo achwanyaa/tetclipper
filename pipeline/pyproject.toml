@@ -61,6 +61,9 @@ pipeline = [
     "torchlibrosa>=0.1.0",
     "whisperx==3.8.6",
 ]
+cloud = [
+    "modal>=1.6",
+]
 
 [tool.uv]
 # Neither group syncs by default. `dev` (pytest) has no business being

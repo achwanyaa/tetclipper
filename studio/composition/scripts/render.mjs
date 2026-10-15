@@ -72,9 +72,13 @@ async function main() {
   const base = `http://127.0.0.1:${server.address().port}`
   try {
     const inputProps = resolveAssets(spec, base)
-    progress(0.02, 'Bundling composition…')
-    const entry = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'entry.ts')
-    const serveUrl = await bundle({ entryPoint: entry })
+    const prebuilt = process.env.TETCLIPPER_BUNDLE
+    let serveUrl = prebuilt
+    if (!prebuilt) {
+      progress(0.02, 'Bundling composition…')
+      const entry = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'entry.ts')
+      serveUrl = await bundle({ entryPoint: entry })
+    }
     const composition = await selectComposition({ serveUrl, id: 'VerticalClip', inputProps })
     progress(0.08, `Rendering ${composition.durationInFrames} frames…`)
     const concurrency = Number(flag('concurrency') ?? Math.max(1, os.cpus().length - 1))

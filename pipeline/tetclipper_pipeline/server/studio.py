@@ -168,14 +168,24 @@ def studio_undo(jobId: str, clip: int) -> dict:
 
 
 @command
+def studio_info() -> dict:
+    from ..cloud import client
+
+    return {"cloud": client.available()}
+
+
+@command
 def studio_cut(source: str, start: float, end: float, captions: str | None = None,
-               language: str | None = None) -> None:
-    """Range mode: fetch START–END, analyse it and build the clip's spec."""
+               language: str | None = None, cloud: bool | None = None) -> None:
+    """Range mode: fetch START–END here, analyse it (Modal GPU or this PC) and
+    build the clip's spec."""
     args = ["cut", source, str(start), str(end)]
     if captions:
         args += ["--captions", captions]
     if language:
         args += ["--language", language]
+    if cloud is not None:
+        args.append("--cloud" if cloud else "--local")
     stream_pipeline(args)
 
 

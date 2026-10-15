@@ -425,12 +425,17 @@ def cmd_cut(args: argparse.Namespace) -> int:
     if args.language and args.language != "auto":
         settings.language = args.language
     job = queue.create_job(source_type, source, json.dumps(settings.to_json()))
-    return _run_range(job, args.jsonl, args.captions, args.camera)
+    from .cloud import client as cloud_client
+
+    cloud = args.cloud if args.cloud is not None else cloud_client.available()
+    return _run_range(job, args.jsonl, args.captions, args.camera, cloud=cloud)
 
 
-def _run_range(job: queue.Job, jsonl: bool, captions: str | None = None, camera: str | None = None) -> int:
-    """Analyse a range job's slice (no scoring) and cut its range, unless that
-    cut already exists. Shared by `cut` and `resume` of a range job."""
+def _run_range(job: queue.Job, jsonl: bool, captions: str | None = None, camera: str | None = None,
+               cloud: bool = False) -> int:
+    """Analyse a range job's slice (no scoring) and build its clip spec, unless
+    that exists. Shared by `cut` and `resume` of a range job. With cloud=True
+    only the download runs here; analysis + camera run on a Modal GPU."""
     settings = config.Settings.from_json(json.loads(job.settings_json))
     start, end = settings.section or (0.0, 0.0)
     emit = _progress_printer(jsonl)
@@ -445,6 +450,14 @@ def _run_range(job: queue.Job, jsonl: bool, captions: str | None = None, camera:
 
     analysis = [s for s in _stages() if s.name in ("ingest", "asr", "diarize", "events")]
     try:
+        if cloud and not (job.dir / "studio").exists():
+            from .cloud import client as cloud_client
+
+            queue.run_stages(job, analysis[:1], emit)  # the download stays on this PC
+            queue.set_job_status(job.id, "running")
+            job = queue.get_job(job.id) or job
+            cloud_client.analyze(job, start, end, captions, emit)
+            job = queue.get_job(job.id) or job
         results = queue.run_stages(job, analysis, emit)
         queue.set_job_status(job.id, "running")  # run_stages says done; the cut is still to come
         offset = float(results["ingest"].get("section_offset", 0.0))
@@ -857,6 +870,9 @@ def main(argv: list[str] | None = None) -> int:
     p_cut.add_argument("--captions", choices=["classic", "beast", "hormozi", "minimal", "karaoke-pop", "sermon", "one-word", "boxed", "neon"], default=None)
     p_cut.add_argument("--camera", choices=["cut", "pan", "locked"], default=None)
     p_cut.add_argument("--language", default="auto", help="speech language: en, sw, … or auto")
+    p_cut.add_argument("--cloud", dest="cloud", action="store_true", default=None,
+                       help="analyse on the Modal GPU (default when Modal is set up)")
+    p_cut.add_argument("--local", dest="cloud", action="store_false", help="analyse on this machine")
     p_cut.set_defaults(fn=cmd_cut)
 
     p_push = sub.add_parser("push", help="download here, run on the hosted GPU (YouTube blocks cloud IPs)")
