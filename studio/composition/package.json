@@ -1,0 +1,33 @@
+{
+  "name": "@tetclipper/composition",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "studio": "remotion studio src/entry.ts",
+    "render": "remotion render src/entry.ts VerticalClip",
+    "gallery": "node scripts/gallery.mjs",
+    "schema": "tsx scripts/export-schema.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/google-fonts": "4.0.535",
+    "remotion": "4.0.535",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@remotion/cli": "4.0.535",
+    "@remotion/zod-types": "4.0.535",
+    "@types/react": "^19.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "zod-to-json-schema": "^3.24.0"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  }
+}

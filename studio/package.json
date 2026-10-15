@@ -1,0 +1,5 @@
+{
+  "name": "tetclipper-studio",
+  "private": true,
+  "workspaces": ["composition"]
+}
