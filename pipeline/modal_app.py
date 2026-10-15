@@ -70,7 +70,7 @@ CHROME_DEPS = [
 ]
 render_image = (
     modal.Image.from_registry("node:22-bookworm-slim", add_python="3.12")
-    .apt_install(*CHROME_DEPS)
+    .apt_install(*CHROME_DEPS, "ffmpeg")
     .add_local_dir(
         str(REPO / "studio"), remote_path="/root/studio", copy=True,
         ignore=["**/node_modules/**", "**/dist/**", "**/public/**", "**/out/**", "editor/src/**"],
@@ -148,14 +148,24 @@ def analyze(row: dict, start: float, end: float, captions: str | None = None):
         volume.commit()
 
 
-@app.function(image=render_image, volumes={HOME: volume}, timeout=30 * 60, cpu=16.0, memory=16384)
+@app.function(image=render_image, volumes={HOME: volume}, timeout=15 * 60, cpu=8.0, memory=8192)
+def render_chunk(job_dir: str, clip: int, first: int, last: int) -> bytes:
+    """One silent chunk of a clip render (fanned out by `render`)."""
+    _in_root()
+    volume.reload()
+    from tetclipper_pipeline.cloud import remote
+
+    return remote.render_chunk(job_dir, clip, first, last)
+
+
+@app.function(image=render_image, volumes={HOME: volume}, timeout=30 * 60, cpu=4.0, memory=8192)
 def render(job_dir: str, clip: int):
-    """Remotion-render one clip spec (generator of progress events)."""
+    """Remotion-render one clip spec in parallel chunks (generator of progress events)."""
     _in_root()
     volume.reload()
     from tetclipper_pipeline.cloud import remote
 
     try:
-        yield from remote.render(job_dir, clip)
+        yield from remote.render(job_dir, clip, lambda args: render_chunk.starmap(args))
     finally:
         volume.commit()

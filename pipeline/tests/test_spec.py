@@ -128,3 +128,27 @@ def test_transcript_lists_phrases_with_word_indices(tmp_path):
     text = transcript.render(tmp_path, spec)
     assert "[5.20–6.10] S0 #0-1: ~~Hello~~ world." in text
     assert "#2-2 ✂: Next" in text
+
+
+@pytest.mark.parametrize(
+    "source, cuts, intro, frames",
+    [
+        # reference values from studio/composition/src/timeline.ts buildTimeline()
+        ((0, 41.867), [], None, 1256),
+        ((0, 41.867), [(6, 7.5)], 2, 1271),
+        ((5.017, 125.0), [(10.05, 12.31), (11, 13.017), (50, 50.01)], 1.25, 3548),
+        ((3.3, 9.95), [(2, 4), (9, 20)], None, 150),
+    ],
+)
+def test_total_frames_matches_the_composition_timeline(source, cuts, intro, frames):
+    from tetclipper_pipeline.cloud.remote import chunk_ranges, total_frames
+
+    spec = {
+        "source": {"start": source[0], "end": source[1]},
+        "cuts": [{"start": a, "end": b} for a, b in cuts],
+        "intro": {"duration": intro} if intro else None,
+    }
+    assert total_frames(spec) == frames
+    ranges = chunk_ranges(frames)
+    assert ranges[0][0] == 0 and ranges[-1][1] == frames - 1
+    assert all(b + 1 == a for (_, b), (a, _) in zip(ranges, ranges[1:]))

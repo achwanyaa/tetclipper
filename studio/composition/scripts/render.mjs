@@ -1,6 +1,10 @@
 // Render one clip spec to mp4 with Remotion.
 //
-//   node scripts/render.mjs <spec.json> <base_dir> <out.mp4> [--concurrency=N]
+//   node scripts/render.mjs <spec.json> <base_dir> <out> [--concurrency=N]
+//                           [--frames=A-B] [--muted] [--audio-only]
+//
+// --frames/--muted render one silent chunk (Modal renders chunks in parallel
+// containers and joins them); --audio-only writes the soundtrack as .wav.
 //
 // Relative `source.src` / `intro.src` / image `src` paths in the spec are
 // resolved against <base_dir> (the job dir) and served by a tiny local HTTP
@@ -72,6 +76,8 @@ async function main() {
   const base = `http://127.0.0.1:${server.address().port}`
   try {
     const inputProps = resolveAssets(spec, base)
+    const frames = flag('frames')?.split('-').map(Number)
+    const audioOnly = rest.includes('--audio-only')
     const prebuilt = process.env.TETCLIPPER_BUNDLE
     let serveUrl = prebuilt
     if (!prebuilt) {
@@ -80,18 +86,22 @@ async function main() {
       serveUrl = await bundle({ entryPoint: entry })
     }
     const composition = await selectComposition({ serveUrl, id: 'VerticalClip', inputProps })
-    progress(0.08, `Rendering ${composition.durationInFrames} frames…`)
+    const count = frames ? frames[1] - frames[0] + 1 : composition.durationInFrames
+    progress(0.08, `Rendering ${count} frames…`)
     const concurrency = Number(flag('concurrency') ?? Math.max(1, os.cpus().length - 1))
     let last = 0
+    const t0 = Date.now()
     await renderMedia({
       serveUrl,
       composition,
       inputProps,
-      codec: 'h264',
-      crf: 20,
-      audioCodec: 'aac',
+      ...(audioOnly ? { codec: 'wav' } : { codec: 'h264', crf: 20, audioCodec: 'aac', muted: rest.includes('--muted') }),
+      ...(frames ? { frameRange: [frames[0], frames[1]] } : {}),
       outputLocation: outPath,
       concurrency,
+      // The frame extractor defaults to 2 threads, which starves 16 browser
+      // workers decoding 1080p source video.
+      offthreadVideoThreads: Math.max(2, concurrency),
       chromiumOptions: { enableMultiProcessOnLinux: true },
       onProgress: ({ progress: p }) => {
         if (p - last >= 0.02 || p === 1) {
@@ -100,7 +110,8 @@ async function main() {
         }
       }
     })
-    say({ event: 'result', ok: true, output: path.resolve(outPath) })
+    const seconds = (Date.now() - t0) / 1000
+    say({ event: 'result', ok: true, output: path.resolve(outPath), seconds, fps: +(count / seconds).toFixed(1) })
   } finally {
     server.close()
   }

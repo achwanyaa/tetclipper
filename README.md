@@ -34,6 +34,36 @@ Beyond the auto-found moments:
 - **Caption editing** — fix any word, or let Claude proofread the captions.
 - **Telegram delivery** — send finished clips to your own bot.
 
+## Studio (chat-driven clip editor)
+
+A browser editor where you talk to Claude Code and watch the clip change.
+
+1. Paste a YouTube link plus a range (12:30 → 13:15). Only that slice is
+   downloaded, on this PC (YouTube blocks cloud IPs).
+2. Transcription, diarization, audio events and the smart camera run on a
+   Modal GPU (or this PC), and produce one `spec.json` for the clip: words,
+   caption style, crop keyframes, punch-ins, intro photo, cuts, effects.
+3. The centre of the editor is a live Remotion preview of that spec. Caption
+   styles (9, with previews), word fixes, cuts, the intro photo and effects
+   change instantly, with no re-render.
+4. The chat on the right runs your own `claude` CLI in the clip's folder. It
+   may only edit `spec.json` and validate it. Its edits show up while it is
+   still answering. Every change (yours or Claude's) can be undone.
+5. **Render** produces the final mp4 on Modal (16 CPUs) or locally, then
+   download it or send it to Telegram.
+
+```sh
+cd studio && npm install && npm run build -w editor     # once, and after editor changes
+cd ../pipeline && uv sync --group server --group cloud  # cloud = the Modal SDK
+modal deploy modal_app.py                               # analyze + render functions
+uv run tetclipper serve                                 # http://localhost:8765/studio/
+```
+
+From a terminal: `tetclipper cut <url> 12:30 13:15 [--cloud|--local]`, then
+`tetclipper spec show|validate|undo|render <job>`. The spec schema lives in
+`studio/composition/src/spec.ts`. Run `npm run schema` there after changing
+it, and `npm run gallery` to re-render the caption style stills.
+
 ## Status
 
 Working end to end: hour-long podcast in, rendered/captioned/scored 9:16 clips
@@ -80,7 +110,8 @@ Creative-Commons tracks from Freesound/Jamendo straight from the app.
 ## Layout
 
 ```
-pipeline/   Python package — the entire processing pipeline + CLI
+pipeline/   Python package — the entire processing pipeline + CLI + web server
+studio/     Studio: Remotion composition (spec → video) + the browser editor
 app/        Tauri v2 desktop shell (React UI, Python sidecar)
 ```
 
