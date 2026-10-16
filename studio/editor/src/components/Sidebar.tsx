@@ -154,7 +154,7 @@ export function Sidebar({ jobs, open, run, onOpen, onCut, onFind, onDismissRun }
                 onClick={() => onOpen(job.id, c.clip)}
               >
                 clip {c.clip + 1}
-                {c.score != null && <span className="score">{c.score.toFixed(1)}</span>}
+                {c.score != null && <span className="score" title="judge score, 0-100">{Math.round(c.score)}</span>}
                 <span>{c.style ? PRESETS[c.style as keyof typeof PRESETS]?.label ?? c.style : ''}</span>
                 {c.rendered && <span className="dot" title="rendered" />}
               </button>
