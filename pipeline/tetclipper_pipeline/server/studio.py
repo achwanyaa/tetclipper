@@ -279,6 +279,39 @@ def studio_dead_air(jobId: str, clip: int, mode: str = "natural", fillers: bool 
 
 
 @command
+def studio_stutters(jobId: str, clip: int, fillers: bool = False, apply: bool = False) -> dict:
+    """Preview (or apply) stutter / false-start removal for a clip."""
+    from ..spec import stutters
+
+    job_dir = _job_dir(jobId)
+    spec = store.load(job_dir, clip)
+    if spec is None:
+        raise CommandError("This clip has no spec yet.")
+    found = stutters.find(spec, fillers)
+    out = {"found": len(found["removals"]), "saved": found["saved"],
+           "removals": [{"at": round(spec["words"][r["from"]]["start"], 2), "kind": r["kind"], "text": r["text"]} for r in found["removals"]]}
+    if apply and found["removals"]:
+        saved = store.save(job_dir, clip, stutters.apply(spec, found),
+                           reason=f"remove stutters: {len(found['removals'])}, -{found['saved']:.1f}s")
+        watcher.note(job_dir, clip)
+        _publish_spec(job_dir, clip, saved, "editor")
+        out.update(spec=saved)
+    return out
+
+
+@command
+def studio_settings(allow_scripts: bool | None = None) -> dict:
+    """Studio preferences (~/.tetclipper/studio.json). allow_scripts lets the
+    chat's Claude run Python/Node scripts — off by default."""
+    path = home_dir() / "studio.json"
+    data = _read_json(path) or {}
+    if allow_scripts is not None:
+        data["allow_scripts"] = bool(allow_scripts)
+        path.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    return {"allow_scripts": bool(data.get("allow_scripts", False))}
+
+
+@command
 def studio_matte(jobId: str, clip: int) -> None:
     """Cut the speaker out of a clip (behind-the-speaker effects)."""
     job_dir = _job_dir(jobId)
@@ -326,7 +359,8 @@ def studio_chat_send(jobId: str, clip: int, message: str, context: dict | None =
         return problems
 
     try:
-        studio_chat.send(job_dir, clip, _title(job_dir), message.strip(), context, events.publish, on_turn_end)
+        studio_chat.send(job_dir, clip, _title(job_dir), message.strip(), context, events.publish, on_turn_end,
+                         allow_scripts=studio_settings()["allow_scripts"])
     except RuntimeError as err:
         raise CommandError(str(err)) from err
 

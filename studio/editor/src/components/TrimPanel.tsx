@@ -18,6 +18,7 @@ export function TrimPanel({ data, spec, editor, update, seek, setError }: PanelP
   const [fillers, setFillers] = useState(false)
   const [preview, setPreview] = useState<{ cuts: number; saved: number; fillers: number } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [stutters, setStutters] = useState<{ found: number; saved: number; removals: { at: number; kind: string; text: string }[] } | null>(null)
 
   useEffect(() => {
     let live = true
@@ -28,6 +29,28 @@ export function TrimPanel({ data, spec, editor, update, seek, setError }: PanelP
       live = false
     }
   }, [data.jobId, data.clip, mode, fillers, spec.cuts, spec.words])
+
+  useEffect(() => {
+    let live = true
+    invoke<{ found: number; saved: number; removals: { at: number; kind: string; text: string }[] }>('studio_stutters', { jobId: data.jobId, clip: data.clip, fillers })
+      .then((p) => live && setStutters(p))
+      .catch(() => live && setStutters(null))
+    return () => {
+      live = false
+    }
+  }, [data.jobId, data.clip, fillers, spec.cuts, spec.words])
+
+  const removeStutters = async () => {
+    setBusy(true)
+    try {
+      const res = await invoke<{ spec?: ClipSpecInput }>('studio_stutters', { jobId: data.jobId, clip: data.clip, fillers, apply: true })
+      if (res.spec) update(res.spec, 'remove stutters')
+    } catch (e) {
+      setError(String((e as Error).message ?? e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const removeDeadAir = async () => {
     setBusy(true)
@@ -61,6 +84,15 @@ export function TrimPanel({ data, spec, editor, update, seek, setError }: PanelP
         </button>
         <span className="muted small">
           {preview ? (preview.cuts || preview.fillers ? `${preview.cuts} cuts · −${preview.saved.toFixed(1)} s${preview.fillers ? ` · ${preview.fillers} fillers` : ''}` : 'nothing to cut') : ''}
+        </span>
+      </div>
+      <div className="trim-row dead-air">
+        <span>Stutters</span>
+        <button className="primary" disabled={busy || !stutters?.found} onClick={removeStutters} title="Repeated words, cut-off words and false starts (deliberate repetition is kept)">
+          Remove stutters
+        </button>
+        <span className="muted small" title={stutters?.removals.map((r) => `${fmt(r.at)} ${r.kind}: ${r.text}`).join(String.fromCharCode(10))}>
+          {stutters ? (stutters.found ? `${stutters.found} found · −${stutters.saved.toFixed(1)} s (hover to list)` : 'none found in the transcript') : ''}
         </span>
       </div>
       <div className="trim-row">

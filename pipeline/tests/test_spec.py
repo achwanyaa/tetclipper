@@ -290,3 +290,49 @@ def test_dead_air_natural_tight_reactions_and_fillers(tmp_path):
     assert with_fillers["filler_words"] == [4]
     applied = silence.apply(spec, with_fillers)
     assert applied["words"][4]["hidden"] and validate(applied) == []
+
+
+# ---------- stutters & false starts ----------
+
+def _seq(*texts, gap=0.1, dur=0.25, pauses=None):
+    pauses = pauses or {}
+    out, t = [], 0.0
+    for i, text in enumerate(texts):
+        t += pauses.get(i, 0)
+        out.append(_w(text, round(t, 3), round(t + dur, 3)))
+        t += dur + gap
+    return out
+
+
+def _stutter_spec(words):
+    return _spec(source={"src": "m.mp4", "start": 0, "end": words[-1]["end"] + 0.5, "width": 1920, "height": 1080}, words=words)
+
+
+def test_stutters_cuts_runon_repeats_fragments_and_restarts():
+    from tetclipper_pipeline.spec import stutters
+
+    words = _seq("I", "I", "I", "went", "home", "and", "we", "are", "we", "are", "going", "th", "the", "church", "wh-", "where",
+                 "so", "the", "church—", "so", "the", "church", "is", "here.", pauses={19: 0.4})
+    found = stutters.find(_stutter_spec(words))
+    got = [(r["kind"], r["text"]) for r in found["removals"]]
+    assert got == [("repeat", "I I"), ("repeat", "we are"), ("fragment", "th"), ("fragment", "wh-"), ("restart", "so the church—")]
+    applied = stutters.apply(_stutter_spec(words), found)
+    kept = [w["text"] for w in applied["words"] if not w.get("hidden")]
+    assert kept == ["I", "went", "home", "and", "we", "are", "going", "the", "church", "where", "so", "the", "church", "is", "here."]
+    assert all(c["end"] <= applied["words"][r["keep"]]["start"] for c, r in zip(found["cuts"], found["removals"]))
+    assert validate(applied) == []
+
+
+def test_stutters_keep_deliberate_repetition():
+    from tetclipper_pipeline.spec import stutters
+
+    words = _seq("Choose", "life.", "Choose", "life.", "Holy,", "holy,", "holy", "God...", "is", "good", "I", "said", "I", "would")
+    assert stutters.find(_stutter_spec(words))["removals"] == []
+
+
+def test_stutters_ignore_words_already_cut():
+    from tetclipper_pipeline.spec import stutters
+
+    words = _seq("be", "be", "passive")
+    spec = {**_stutter_spec(words), "cuts": [{"start": 0.0, "end": 0.3}]}
+    assert stutters.find(spec)["removals"] == []

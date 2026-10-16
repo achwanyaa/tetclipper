@@ -35,6 +35,18 @@ ALLOWED_TOOLS = [
     "Bash(uv run tetclipper spec show:*)",
     "Bash(uv run tetclipper audio list:*)",
     "Bash(uv run tetclipper spec dead-air:*)",
+    "Bash(uv run tetclipper spec stutters:*)",
+    "Bash(uv run tetclipper spec words:*)",
+]
+# With "Let Claude run scripts" on (Studio chat panel; off by default): write
+# helper scripts under ./scripts/ and run them. This runs arbitrary code on
+# the user's PC, so it is the user's explicit choice.
+SCRIPT_TOOLS = [
+    "Write(./scripts/**)",
+    "Edit(./scripts/**)",
+    "Bash(uv run python:*)",
+    "Bash(python:*)",
+    "Bash(node:*)",
 ]
 
 GUIDE = """# Studio clip editor
@@ -62,6 +74,16 @@ Job {job_id}, clip {clip}: "{title}".
   speaks (0.35 = speech stays clear). Tracks the user added live in `assets/`;
   the user's music library is listed by `uv run tetclipper audio list --kind music`
   (copy a track into assets by asking the user to pick it in the Music tab).
+- To read word timings without opening the big spec, run
+  `uv run tetclipper spec words {job_id} --clip {clip} [--from S --to S] [--find TEXT]`
+  → `#index start-end text` per word (~hidden~, ✂ = already cut).
+- To edit out stutters, repeated words and false starts, run
+  `uv run tetclipper spec stutters {job_id} --clip {clip} [--fillers] --apply`
+  (without --apply it only lists them). It keeps deliberate repetition
+  ("Choose life. Choose life."). The transcript may have tidied some stutters
+  away, so for ones the user points at, find the words with `spec words` and
+  cut them yourself (hide the words + add a cut ending just before the kept word).
+{scripts_note}
 - To remove silences / dead air, run
   `uv run tetclipper spec dead-air {job_id} --clip {clip} [--mode natural|tight] [--fillers] --apply`
   (without --apply it only previews). natural keeps short sentence pauses,
@@ -129,9 +151,19 @@ def _fmt(t: float) -> str:
     return f"{int(t // 60)}:{t % 60:04.1f}"
 
 
-def write_guide(job_dir: Path, clip: int, title: str) -> Path:
+SCRIPTS_ON = """- You may write helper scripts in ./scripts/ and run them with `uv run python
+  scripts/<name>.py` (numpy is available) — e.g. to compute cuts from word
+  timings. Scripts may read anything here but must change the clip only by
+  writing spec.json; always run `spec validate` afterwards."""
+SCRIPTS_OFF = """- You can't run scripts in this session (the user hasn't allowed it). Use the
+  commands above; if a task really needs a script, say so — the user can turn
+  on "Let Claude run scripts" in the chat panel."""
+
+
+def write_guide(job_dir: Path, clip: int, title: str, allow_scripts: bool = False) -> Path:
     path = store.clip_dir(job_dir, clip) / "CLAUDE.md"
-    path.write_text(GUIDE.format(job_id=job_dir.name, clip=clip, title=title or job_dir.name), encoding="utf-8")
+    path.write_text(GUIDE.format(job_id=job_dir.name, clip=clip, title=title or job_dir.name,
+                                 scripts_note=SCRIPTS_ON if allow_scripts else SCRIPTS_OFF), encoding="utf-8")
     return path
 
 
@@ -189,7 +221,7 @@ def busy(job_dir: Path, clip: int) -> bool:
 
 
 def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
-         publish: Callable[[dict], None], on_turn_end: Callable[[], list[str]]) -> None:
+         publish: Callable[[dict], None], on_turn_end: Callable[[], list[str]], allow_scripts: bool = False) -> None:
     """Start one chat turn on a thread. `on_turn_end` validates the spec and
     returns problems (it restores the last good version itself)."""
     key = f"{job_dir.name}/{clip}"
@@ -202,7 +234,8 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
         _busy.add(key)
 
     cwd = store.clip_dir(job_dir, clip)
-    write_guide(job_dir, clip, title)
+    write_guide(job_dir, clip, title, allow_scripts)
+    tools = [*ALLOWED_TOOLS, *(SCRIPT_TOOLS if allow_scripts else [])]
     data = history(job_dir, clip)
     data["messages"].append({"role": "user", "text": message, "ts": time.time()})
     _save(job_dir, clip, data)
@@ -213,7 +246,7 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
     def run_turn(prompt: str, session_id: str | None) -> tuple[str | None, list[str], str | None]:
         args = [
             claude, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-            "--max-turns", str(MAX_TURNS), "--allowedTools", *ALLOWED_TOOLS,
+            "--max-turns", str(MAX_TURNS), "--allowedTools", *tools,
         ]
         if session_id:
             args += ["--resume", session_id]

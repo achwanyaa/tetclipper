@@ -47,6 +47,19 @@ def add_parser(sub) -> None:
     p_dead.add_argument("--fillers", action="store_true", help="also cut isolated um/uh/erm/ah/hmm")
     p_dead.add_argument("--apply", action="store_true", help="add the cuts to the spec (one Undo reverts)")
 
+    p_stut = spec_sub.add_parser("stutters", help="find (or with --apply, cut) stutters, repeats and false starts")
+    p_stut.add_argument("job_id")
+    p_stut.add_argument("--clip", type=int, default=0)
+    p_stut.add_argument("--fillers", action="store_true", help="also cut um/uh/erm")
+    p_stut.add_argument("--apply", action="store_true", help="hide the words and cut their audio (one Undo reverts)")
+
+    p_words = spec_sub.add_parser("words", help="compact word list: '#index start-end text' (hidden ~struck~, cut ✂)")
+    p_words.add_argument("job_id")
+    p_words.add_argument("--clip", type=int, default=0)
+    p_words.add_argument("--from", dest="t0", type=float, default=None, help="source seconds")
+    p_words.add_argument("--to", dest="t1", type=float, default=None, help="source seconds")
+    p_words.add_argument("--find", default=None, help="only lines around this text")
+
     p_doubts = spec_sub.add_parser("doubts", help="re-check captions: flag doubtful spans + Swahili second listen")
     p_doubts.add_argument("job_id")
     p_doubts.add_argument("--clip", type=int, default=0)
@@ -91,8 +104,14 @@ def _summary(job_dir: Path, clip_idx: int, spec: dict) -> dict:
 
 
 def run(args: argparse.Namespace) -> int:
+    import sys
+
     from ..cli import _emit_result, _progress_printer
     from ..jobs import queue
+
+    # Transcripts carry Swahili, ✂ and emoji; Windows consoles default to cp1252.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     job = queue.get_job(args.job_id)
     if job is None:
@@ -162,6 +181,49 @@ def run(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": True, "applied": bool(args.apply), "cuts": len(found["cuts"]),
                           "saved_seconds": found["saved"], "fillers": len(found["filler_words"]),
                           "kept_pauses": found["kept"][:20], "new_cuts": found["cuts"][:50]}))
+        return 0
+
+    if args.spec_cmd == "stutters":
+        from . import stutters
+
+        spec = store.load(job_dir, args.clip)
+        if spec is None:
+            print(json.dumps({"ok": False, "error": f"no spec for clip {args.clip}"}))
+            return 1
+        found = stutters.find(spec, args.fillers)
+        if args.apply and found["removals"]:
+            kinds = {}
+            for r in found["removals"]:
+                kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
+            summary = ", ".join(f"{n} {k}{'s' if n > 1 else ''}" for k, n in kinds.items())
+            store.save(job_dir, args.clip, stutters.apply(spec, found), reason=f"remove stutters: {summary}, -{found['saved']:.1f}s")
+        print(json.dumps({"ok": True, "applied": bool(args.apply), "found": len(found["removals"]),
+                          "saved_seconds": found["saved"],
+                          "removals": [{**r, "at": round(spec["words"][r["from"]]["start"], 2)} for r in found["removals"][:80]]},
+                         ensure_ascii=False))
+        return 0
+
+    if args.spec_cmd == "words":
+        spec = store.load(job_dir, args.clip)
+        if spec is None:
+            print(f"no spec for clip {args.clip}")
+            return 1
+        words, cuts = spec.get("words", []), spec.get("cuts", [])
+        t0 = args.t0 if args.t0 is not None else spec["source"]["start"]
+        t1 = args.t1 if args.t1 is not None else spec["source"]["end"]
+        rows = [i for i, w in enumerate(words) if w["end"] > t0 and w["start"] < t1]
+        if args.find:
+            from .glossary import norm
+
+            needle = norm(args.find)
+            hits = [i for i in rows if needle in norm(" ".join(x["text"] for x in words[i : i + len(needle.split())]))]
+            rows = sorted({j for i in hits for j in range(max(0, i - 6), min(len(words), i + 10))})
+        for i in rows:
+            w = words[i]
+            mid = (w["start"] + w["end"]) / 2
+            text = f"~{w['text']}~" if w.get("hidden") else w["text"]
+            mark = " ✂" if any(c["start"] <= mid < c["end"] for c in cuts) else ""
+            print(f"#{i} {w['start']:.2f}-{w['end']:.2f} {text}{mark}")
         return 0
 
     if args.spec_cmd == "doubts":

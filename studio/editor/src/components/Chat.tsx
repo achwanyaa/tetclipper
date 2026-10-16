@@ -7,7 +7,8 @@ const EXAMPLES = [
   'Cut the first sentence and any long pauses',
   'Add a title card for the first 3 seconds with the main point',
   'Check the doubtful captions (Swahili/Sheng) and fix what you can',
-  'Remove the dead air'
+  'Remove the dead air',
+  'Edit out stutters and false starts'
 ]
 
 /** Chat with Claude Code about the open clip. Edits land in spec.json and
@@ -19,6 +20,11 @@ export function Chat({ data, editor }: { data: ClipData; editor: EditorState }) 
   const [notes, setNotes] = useState<string[]>([])
   const [input, setInput] = useState('')
   const [withContext, setWithContext] = useState(true)
+  const [scripts, setScripts] = useState(false)
+
+  useEffect(() => {
+    invoke<{ allow_scripts: boolean }>('studio_settings').then((s) => setScripts(s.allow_scripts)).catch(() => undefined)
+  }, [])
   const log = useRef<HTMLDivElement>(null)
 
   useEffect(
@@ -74,6 +80,25 @@ export function Chat({ data, editor }: { data: ClipData; editor: EditorState }) 
     <aside className="chat">
       <header>
         <span>Claude Code</span>
+        <label
+          className="toggle small scripts-toggle"
+          title="Let Claude write and run Python/Node scripts on this PC (in the clip's scripts/ folder). It can then run any code your user account can — only turn on if you're comfortable with that."
+        >
+          <input
+            type="checkbox"
+            checked={scripts}
+            onChange={async (e) => {
+              const on = e.target.checked
+              setScripts(on)
+              try {
+                await invoke('studio_settings', { allow_scripts: on })
+              } catch {
+                setScripts(!on)
+              }
+            }}
+          />
+          run scripts
+        </label>
         <button
           className="link small"
           disabled={busy}

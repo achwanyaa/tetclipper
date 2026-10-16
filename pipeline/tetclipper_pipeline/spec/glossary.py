@@ -26,9 +26,12 @@ SEED_PHRASES = [  # suggestions shown in the word list; not hinted until the use
     "Bwana", "neno la Mungu", "sasa", "kwa hivyo", "lakini", "ama", "ndio", "hapana", "sisi", "nyinyi",
     "mimi", "wewe", "ati", "hii", "hiyo", "kweli", "maombi", "baraka", "utukufu", "imani", "anasema",
 ]
+# Mixed English/Swahili so Swahili is written as Swahili, and disfluent
+# ("um, I- I mean") so Whisper writes stutters and false starts verbatim
+# instead of tidying them away — the stutter tool can only cut what it sees.
 INITIAL_PROMPT = (
-    "Bwana asifiwe, wapendwa. Ebu tusome Revelation chapter 5. Yesu ni Bwana, amen. "
-    "Mungu anasema, sasa kwa hivyo, let us pray."
+    "Bwana asifiwe, wapendwa. Ebu tusome Revelation chapter 5. Um, Yesu ni- Yesu ni Bwana, amen. "
+    "Mungu anasema, uh, sasa kwa hivyo, I- I mean, let us pray."
 )
 MAX_HOTWORDS = 40
 MAX_RUN = 8  # longer changed runs are rewrites, not misheard words

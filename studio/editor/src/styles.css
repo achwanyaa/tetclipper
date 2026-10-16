@@ -164,6 +164,7 @@ table.effects td { padding: 5px 8px; border-bottom: 1px solid var(--line); font-
 
 /* ---- chat ---- */
 .chat { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.scripts-toggle { margin-left: auto; margin-right: 10px; font-weight: 400; color: var(--muted); }
 .chat header { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 600; }
 .log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .msg { padding: 9px 12px; border-radius: 10px; white-space: pre-wrap; line-height: 1.45; max-width: 92%; }
