@@ -1,7 +1,6 @@
 """Remove dead air: cut long pauses (and optionally um/uh fillers) from a clip.
 
-Same rules as the old editor's detector (edits/timeline.py detect_dead_space),
-parameterised so there's a tighter mode, and working on a spec's words:
+Rules (natural and tight modes), working on a spec's words:
   * a gap shorter than MIN_GAP always stays
   * a breath is kept on each side of every cut
   * pauses near laughter/gasps/applause are comedic timing and stay

@@ -1,8 +1,11 @@
 """tetclipper CLI.
 
-Doubles as the desktop app's sidecar: with --jsonl every progress event and
-the final result are emitted as one JSON object per stdout line, so the
-Tauri shell just spawns `tetclipper --jsonl run <source>` and streams.
+With --jsonl every progress event and the final result are emitted as one
+JSON object per stdout line; the Studio server (server/app.py) spawns
+`tetclipper --jsonl …` and streams them to the browser.
+
+  cut    one exact range → a Studio clip            find   best moments → clips
+  spec   build / edit / check / render clip specs    serve  the Studio editor
 """
 
 from __future__ import annotations
@@ -17,32 +20,17 @@ from .jobs import queue
 
 
 def _stages() -> list[queue.Stage]:
-    # Grows per milestone: ingest → asr → diarize → events → candidates →
-    # score → camera → render. Stage imports are deferred so `tetclipper
-    # jobs` doesn't pay the torch import tax.
+    """ingest → asr → diarize → events → candidates → score. Range cuts use
+    the first four; `find` uses all six. Imports are deferred so cheap
+    commands don't pay the torch import tax."""
     from .asr.stage import AsrStage
-    from .camera.stage import CameraStage
     from .candidates.stage import CandidatesStage
     from .diarize.stage import DiarizeStage
     from .events.stage import EventsStage
     from .ingest.stage import IngestStage
-    from .render.stage import RenderStage
     from .scoring.stage import ScoreStage
 
-    stages = [
-        IngestStage(),
-        AsrStage(),
-        DiarizeStage(),
-        EventsStage(),
-        CandidatesStage(),
-        ScoreStage(),
-        CameraStage(),
-        RenderStage(),
-    ]
-    # Hybrid hosting: the GPU deployment stops before these (the user's own
-    # machine pulls the job and renders; see jobs/remote.py).
-    skip = {s.strip() for s in os.environ.get("TETCLIPPER_SKIP_STAGES", "").split(",") if s.strip()}
-    return [s for s in stages if s.name not in skip]
+    return [IngestStage(), AsrStage(), DiarizeStage(), EventsStage(), CandidatesStage(), ScoreStage()]
 
 
 def _progress_printer(jsonl: bool):
@@ -194,96 +182,18 @@ def _net_ready(args: argparse.Namespace) -> bool:
     return False
 
 
-def cmd_run(args: argparse.Namespace) -> int:
-    source = args.source
-    source_type = "url" if source.startswith(("http://", "https://")) else "file"
-    settings = config.Settings()
-    if args.llm:
-        settings.llm_mode = args.llm
-    if args.captions:
-        settings.caption_preset = args.captions
-    if args.camera:
-        settings.camera.speaker_change = args.camera
-    if getattr(args, "language", None) and args.language != "auto":
-        settings.language = args.language
-    job = queue.create_job(source_type, source, json.dumps(settings.to_json()))
-    return _execute(job, args.jsonl)
-
-
 def cmd_resume(args: argparse.Namespace) -> int:
+    """Finish a range job that stopped part-way (every finished stage is cached)."""
     job = queue.get_job(args.job_id)
     if job is None:
         print(f"No job {args.job_id}", file=sys.stderr)
         return 2
-    if args.llm or args.captions or args.camera:
-        settings = config.Settings.from_json(json.loads(job.settings_json))
-        if args.llm:
-            settings.llm_mode = args.llm
-        if args.captions:
-            settings.caption_preset = args.captions
-        if args.camera:
-            settings.camera.speaker_change = args.camera
-        new_json = json.dumps(settings.to_json())
-        with queue._connect() as conn:  # noqa: SLF001 — CLI is a queue friend
-            conn.execute("UPDATE jobs SET settings_json = ? WHERE id = ?", (new_json, job.id))
-        job = queue.get_job(args.job_id)
-    if config.Settings.from_json(json.loads(job.settings_json)).section:
-        return _run_range(job, args.jsonl, args.captions, args.camera)
-    return _execute(job, args.jsonl)
+    if not config.Settings.from_json(json.loads(job.settings_json)).section:
+        print("Only range jobs resume; run `tetclipper find` again for a find job.", file=sys.stderr)
+        return 2
+    from .cloud import client as cloud_client
 
-
-def _execute(job: queue.Job, jsonl: bool) -> int:
-    emit = _progress_printer(jsonl)
-    if jsonl:
-        print(json.dumps({"event": "job", "job_id": job.id, "dir": str(job.dir)}), flush=True)
-    else:
-        print(f"job {job.id} → {job.dir}", file=sys.stderr)
-    ok, err = _ensure_pipeline_deps(jsonl, emit)
-    if not ok:
-        message = f"Couldn't install pipeline dependencies (one-time setup): {err}"
-        # run_stages() never ran, so nothing else will move this job off
-        # "pending" -- record the failure here or the row stays pending
-        # forever and `tetclipper jobs` shows it as still queued.
-        queue.set_job_status(job.id, "failed", message)
-        _emit_result(jsonl, {"ok": False, "job_id": job.id, "error": message})
-        return 1
-    from .scoring.brain import AwaitingBrain
-
-    try:
-        results = queue.run_stages(job, _stages(), emit)
-    except AwaitingBrain as err:
-        _emit_result(jsonl, {
-            "ok": False, "job_id": job.id, "error": str(err),
-            "awaiting": "brain", "pending": err.count, "purpose": err.purpose,
-        })
-        return 3
-    except queue.StageError as err:
-        _emit_result(jsonl, {"ok": False, "job_id": job.id, "error": str(err)})
-        return 1
-    except Exception as err:  # noqa: BLE001 — a stage crash must still emit a result event
-        # A stage's underlying dependency (whisperX/huggingface_hub during
-        # model load, ffmpeg, torch, …) can raise its own exception type
-        # instead of queue.StageError. Previously that escaped this
-        # function uncaught, killed the sidecar with a bare traceback, and
-        # left main.rs/App.tsx with no "result" event to show — just the
-        # generic "pipeline exited unexpectedly" banner while the UI was
-        # still on the last progress message. run_stages() already recorded
-        # stage attribution before re-raising (mark_stage + set_job_status),
-        # so read that back: it names the stage that died, which a bare
-        # repr(err) does not.
-        failed_job = queue.get_job(job.id)
-        error = failed_job.error if failed_job and failed_job.error else repr(err)
-        _emit_result(jsonl, {"ok": False, "job_id": job.id, "error": error})
-        return 1
-    summary = {
-        "ok": True,
-        "job_id": job.id,
-        "stages": list(results.keys()),
-        "title": results.get("ingest", {}).get("title"),
-        "heatmap_segments": len(results.get("ingest", {}).get("heatmap") or []),
-    }
-    _emit_result(jsonl, summary)
-    return 0
+    return _run_range(job, args.jsonl, args.captions, None, cloud=cloud_client.available())
 
 
 def cmd_jobs(args: argparse.Namespace) -> int:
@@ -320,7 +230,7 @@ def cmd_brain(args: argparse.Namespace) -> int:
     print(json.dumps(report))
     if report["missing"] or report["errors"]:
         return 1
-    print(f"All answers stored. Next: tetclipper resume {job.id} --llm claude", file=sys.stderr)
+    print("All answers stored.", file=sys.stderr)
     return 0
 
 
@@ -342,55 +252,18 @@ def cmd_telegram(args: argparse.Namespace) -> int:
             if job is None:
                 print(json.dumps({"ok": False, "error": f"no job {args.job_id}"}))
                 return 2
-            render = json.loads((job.dir / "render.json").read_text())["data"]
-            entry = next((o for o in render.get("outputs", []) if o["clip"] == args.clip), None)
-            if entry is None:
+            from .spec import store as spec_store
+
+            path = spec_store.clip_dir(job.dir, args.clip) / "render.mp4"
+            if not path.exists():
                 print(json.dumps({"ok": False, "error": f"clip {args.clip} is not rendered"}))
                 return 2
-            caption = args.caption or f"{job.title or job.id} · clip {args.clip}"
-            out = tg.send_clip(entry["path"], caption)
+            caption = args.caption or f"{job.title or job.id} · clip {args.clip + 1}"
+            out = tg.send_clip(path, caption)
     except tg.TelegramError as err:
         print(json.dumps({"ok": False, "error": str(err)}))
         return 1
     print(json.dumps({"ok": True, **out}))
-    return 0
-
-
-def cmd_pull(args: argparse.Namespace) -> int:
-    """Copy a job from the hosted deployment to this machine (then `resume` renders it)."""
-    if not _net_ready(args):
-        return 1
-    from .jobs import remote
-
-    emit = _progress_printer(args.jsonl)
-    try:
-        info = remote.pull(args.job_id, lambda f, m: emit("pull", f, m))
-    except remote.RemoteError as err:
-        _emit_result(args.jsonl, {"ok": False, "job_id": args.job_id, "error": str(err)})
-        return 1
-    if args.render:
-        job = queue.get_job(args.job_id)
-        assert job is not None
-        return _execute(job, args.jsonl)
-    _emit_result(args.jsonl, {"ok": True, "pulled": True, **info})
-    return 0
-
-
-def cmd_push(args: argparse.Namespace) -> int:
-    """Download here, upload to the hosted GPU, start the job there."""
-    ok, err = _ensure_pipeline_deps(args.jsonl, _progress_printer(args.jsonl))
-    if not ok:
-        _emit_result(args.jsonl, {"ok": False, "error": str(err)})
-        return 1
-    from .jobs import remote
-
-    emit = _progress_printer(args.jsonl)
-    try:
-        info = remote.push(args.source, emit, llm=args.llm, captions=args.captions)
-    except Exception as err:  # noqa: BLE001 — yt-dlp, network, auth: all user-facing
-        _emit_result(args.jsonl, {"ok": False, "error": str(err)})
-        return 1
-    _emit_result(args.jsonl, {"ok": True, "pushed": True, **info})
     return 0
 
 
@@ -473,7 +346,7 @@ def _run_range(job: queue.Job, jsonl: bool, captions: str | None = None, camera:
         else:
             idx = manual.add_range(
                 job, start - offset, end - offset, lambda f, m: emit("spec", f, m),
-                caption_preset=captions, camera_mode=camera, render=False,
+                caption_preset=captions, camera_mode=camera,
             )["clip_index"]
         spec_build.build(job.dir, idx, style=captions, emit=lambda f, m: emit("spec", f, m))
         entry = {"clip_index": idx, "spec": str(spec_store.spec_path(job.dir, idx))}
@@ -493,218 +366,6 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     serve(args.host, args.port)
     return 0
-
-
-def cmd_edit(args: argparse.Namespace) -> int:
-    """Per-clip editing verbs. All output is JSON on stdout for the app."""
-    from pathlib import Path
-
-    from .edits import render_clip as rc
-    from .edits import store, visuals
-
-    job = queue.get_job(args.job_id)
-    if job is None:
-        print(json.dumps({"ok": False, "error": f"no job {args.job_id}"}))
-        return 2
-    job_dir = Path(job.dir)
-
-    if args.edit_cmd == "context":
-        print(json.dumps({"ok": True, **rc.context_for_clip(job_dir, args.clip)}))
-        return 0
-
-    if args.edit_cmd == "suggest-visuals":
-        score = json.loads((job_dir / "score.json").read_text())["data"]
-        clip = score["clips"][args.clip]
-        edit = store.edit_for_clip(job_dir, args.clip, clip)
-        # plan against OUTPUT-time words = current bounds without dead-space
-        # (suggestions land on the source-bounds timeline the UI shows)
-        diarize = json.loads((job_dir / "diarize.json").read_text())["data"]
-        words = [
-            {"word": w["word"], "start": w["start"] - edit.start, "end": w["end"] - edit.start}
-            for seg in diarize["segments"]
-            for w in seg.get("words", [])
-            if edit.start <= w["start"] < edit.end
-        ]
-        settings = config.Settings.from_json(json.loads(job.settings_json))
-        try:
-            suggestions = visuals.suggest(job_dir, words, settings.llm_mode, prefer=args.prefer)
-        except Exception as err:  # noqa: BLE001 — surface, don't crash the app
-            print(json.dumps({"ok": False, "error": str(err)}))
-            return 1
-        edits = store.load(job_dir)
-        current = edits.get(str(args.clip), edit)
-        known = {o.id for o in current.overlays}
-        current.overlays.extend(o for o in suggestions if o.id not in known)
-        edits[str(args.clip)] = current
-        store.save(job_dir, edits)
-        print(json.dumps({"ok": True, "edit": current.to_json()}))
-        return 0
-
-    if args.edit_cmd == "render-clip":
-        emit = _progress_printer(args.jsonl)
-        try:
-            entry = rc.render_clip_edit(job_dir, args.clip, lambda f, m: emit("render", f, m))
-        except Exception as err:  # noqa: BLE001
-            _emit_result(args.jsonl, {"ok": False, "error": str(err)})
-            return 1
-        _emit_result(args.jsonl, {"ok": True, "output": entry})
-        return 0
-
-    if args.edit_cmd == "proofread":
-        from .edits import proofread
-        from .server import chat
-
-        claude = chat._claude()  # noqa: SLF001
-        if claude is None:
-            print(json.dumps({"ok": False, "error": "Proofreading needs the Claude Code CLI signed in on this machine."}))
-            return 1
-        try:
-            out = proofread.proofread(job_dir, args.clip, claude, job.title)
-        except Exception as err:  # noqa: BLE001 — surface, don't crash the app
-            print(json.dumps({"ok": False, "error": str(err)}))
-            return 1
-        print(json.dumps({"ok": True, **out}))
-        return 0
-
-    if args.edit_cmd == "text":
-        from .edits import manual
-
-        try:
-            print(manual.transcript_text(job_dir, args.start, args.end, args.find))
-        except ValueError as err:
-            print(str(err))
-            return 1
-        return 0
-
-    if args.edit_cmd == "transcript":
-        from .edits import manual
-
-        try:
-            print(json.dumps({"ok": True, **manual.transcript(job_dir)}))
-        except ValueError as err:
-            print(json.dumps({"ok": False, "error": str(err)}))
-            return 1
-        return 0
-
-    if args.edit_cmd == "add-range":
-        from .edits import manual
-
-        emit = _progress_printer(args.jsonl)
-        try:
-            entry = manual.add_range(
-                job, args.start, args.end, lambda f, m: emit("render", f, m),
-                caption_preset=args.captions, camera_mode=args.camera,
-            )
-        except Exception as err:  # noqa: BLE001 — surface, don't crash the app
-            _emit_result(args.jsonl, {"ok": False, "job_id": job.id, "error": str(err)})
-            return 1
-        _emit_result(args.jsonl, {"ok": True, "job_id": job.id, "output": entry, "manual": True})
-        return 0
-
-    if args.edit_cmd == "audio-suggest":
-        try:
-            suggestions = rc.suggest_audio_for_clip(job_dir, args.clip)
-        except Exception as err:  # noqa: BLE001 — surface, don't crash the app
-            print(json.dumps({"ok": False, "error": str(err)}))
-            return 1
-        print(json.dumps({"ok": True, "audio": [a.to_json() for a in suggestions]}))
-        return 0
-    return 2
-
-
-def cmd_ig(args: argparse.Namespace) -> int:
-    if not _net_ready(args):
-        return 1
-    from .insights import calibration, instagram
-
-    if args.ig_cmd == "connect":
-        conn = instagram.connect(args.app_id, args.app_secret)
-        print(f"Connected as @{conn['username']} (user {conn['user_id']}).")
-        return 0
-
-    # App-facing commands: exactly one JSON line on stdout (the shell's
-    # ig_tool parses the last JSON line, same contract as edit_tool).
-    if args.ig_cmd == "sync":
-        summary = calibration.sync()
-        print(json.dumps(summary))
-        return 0 if summary.get("ok") else 1
-
-    if args.ig_cmd == "overview":
-        print(json.dumps(calibration.overview()))
-        return 0
-
-    if args.ig_cmd == "link":
-        job = queue.get_job(args.job_id)
-        if job is None:
-            print(json.dumps({"ok": False, "error": f"no job {args.job_id}"}))
-            return 2
-        score_data = queue.read_checkpoint(job, "score", 1)
-        if not score_data:
-            print(json.dumps({"ok": False, "error": "job has no score checkpoint"}))
-            return 2
-        clips = score_data["clips"]
-        if not 0 <= args.clip < len(clips):
-            print(json.dumps({"ok": False, "error": f"clip index out of range (0..{len(clips) - 1})"}))
-            return 2
-        calibration.link_clip(
-            args.job_id, args.clip, args.media_id, clips[args.clip],
-            link_source=args.source,
-            config_version=score_data.get("scoring_config_version", 1),
-        )
-        print(json.dumps({"ok": True, "linked": {"job_id": args.job_id, "clip": args.clip, "media_id": args.media_id}}))
-        return 0
-
-    if args.ig_cmd == "unlink":
-        removed = calibration.unlink(args.media_id)
-        print(json.dumps({"ok": True, "removed": removed}))
-        return 0
-
-    if args.ig_cmd == "reject":
-        calibration.reject_match(args.media_id, args.job_id, args.clip)
-        print(json.dumps({"ok": True}))
-        return 0
-
-    # Human/legacy commands.
-    conn = instagram.load_connection()
-    if args.ig_cmd in ("media", "pull") and conn is None:
-        print("Not connected. Run: tetclipper ig connect --app-id ... --app-secret ...", file=sys.stderr)
-        return 2
-    if conn is not None:
-        conn = instagram.refresh_if_needed(conn)
-
-    if args.ig_cmd == "media":
-        for m in instagram.recent_media(conn):
-            if m.get("media_product_type") == "REELS" or m.get("media_type") == "VIDEO":
-                caption = (m.get("caption") or "")[:60].replace("\n", " ")
-                print(f"{m['id']}  {m.get('timestamp', '')[:10]}  {caption}")
-        return 0
-
-    if args.ig_cmd == "pull":
-        rows = calibration.tracked()
-        if not rows:
-            print("No linked clips yet. Post an exported clip, then: tetclipper ig link ...")
-            return 0
-        for row in rows:
-            if not row["ig_media_id"]:
-                continue
-            try:
-                metrics = instagram.media_insights(conn, row["ig_media_id"])
-            except instagram.IgError as err:
-                print(f"{row['ig_media_id']}: {err}", file=sys.stderr)
-                continue
-            calibration.store_metrics(row["ig_media_id"], metrics)
-            views = metrics.get("views")
-            watch = metrics.get("ig_reels_avg_watch_time")
-            print(
-                f"{row['ig_media_id']}  score {row['score']:.0f} → views {views}, "
-                f"avg watch {round(watch / 1000, 1) if watch else '?'}s"
-            )
-        return 0
-
-    if args.ig_cmd == "report":
-        print(json.dumps(calibration.report(args.metric), indent=2))
-        return 0
-    return 2
 
 
 def cmd_audio(args: argparse.Namespace) -> int:
@@ -819,25 +480,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--jsonl", action="store_true", help="machine-readable progress on stdout")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_run = sub.add_parser("run", help="process a YouTube URL or local video file")
-    p_run.add_argument("source")
-    p_run.add_argument("--llm", choices=["claude", "gemini", "ollama"], default=None)
-    p_run.add_argument("--captions", default=None, help="caption preset name")
-    p_run.add_argument("--camera", choices=["cut", "pan", "locked"], default=None)
-    p_run.add_argument("--language", default="auto", help="speech language: en, sw, … or auto")
-    p_run.set_defaults(fn=cmd_run)
-
-    p_resume = sub.add_parser("resume", help="resume a job from its checkpoints")
+    p_resume = sub.add_parser("resume", help="finish a range job that stopped part-way")
     p_resume.add_argument("job_id")
-    p_resume.add_argument("--llm", choices=["claude", "gemini", "ollama"], default=None)
-    p_resume.add_argument("--captions", default=None, help="caption preset name")
-    p_resume.add_argument("--camera", choices=["cut", "pan", "locked"], default=None)
+    p_resume.add_argument("--captions", default=None, help="caption style")
     p_resume.set_defaults(fn=cmd_resume)
 
     p_jobs = sub.add_parser("jobs", help="list jobs")
     p_jobs.set_defaults(fn=cmd_jobs)
 
-    p_brain = sub.add_parser("brain", help="Claude Code scoring handoff (--llm claude)")
+    p_brain = sub.add_parser("brain", help="Claude Code as the judge for `find` (show / answer pending prompts)")
     brain_sub = p_brain.add_subparsers(dest="brain_cmd", required=True)
     p_bshow = brain_sub.add_parser("show", help="print the prompts a paused job is waiting on")
     p_bshow.add_argument("job_id")
@@ -858,12 +509,7 @@ def main(argv: list[str] | None = None) -> int:
     p_tg_send.add_argument("--caption", default=None)
     p_tg.set_defaults(fn=cmd_telegram)
 
-    p_pull = sub.add_parser("pull", help="copy a job from the hosted deployment to this machine")
-    p_pull.add_argument("job_id")
-    p_pull.add_argument("--render", action="store_true", help="resume it right after (renders locally)")
-    p_pull.set_defaults(fn=cmd_pull)
-
-    p_cut = sub.add_parser("cut", help="range mode: fetch only START-END of a video and cut it")
+    p_cut = sub.add_parser("cut", help="fetch only START-END of a video and make it a Studio clip")
     p_cut.add_argument("source", help="YouTube URL or local video file")
     p_cut.add_argument("start", type=_parse_clock, help="e.g. 12:30")
     p_cut.add_argument("end", type=_parse_clock, help="e.g. 13:15")
@@ -875,77 +521,14 @@ def main(argv: list[str] | None = None) -> int:
     p_cut.add_argument("--local", dest="cloud", action="store_false", help="analyse on this machine")
     p_cut.set_defaults(fn=cmd_cut)
 
-    p_push = sub.add_parser("push", help="download here, run on the hosted GPU (YouTube blocks cloud IPs)")
-    p_push.add_argument("source", help="YouTube URL or local video file")
-    p_push.add_argument("--llm", choices=["claude", "gemini", "ollama"], default=None)
-    p_push.add_argument("--captions", default=None)
-    p_push.set_defaults(fn=cmd_push)
-
     p_serve = sub.add_parser("serve", help="run Studio (http://localhost:8765/studio/) + the API")
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8765)
     p_serve.set_defaults(fn=cmd_serve)
 
-    p_edit = sub.add_parser("edit", help="per-clip editing (context / visuals / render)")
-    edit_sub = p_edit.add_subparsers(dest="edit_cmd", required=True)
-    p_ctx = edit_sub.add_parser("context")
-    p_ctx.add_argument("job_id")
-    p_ctx.add_argument("clip", type=int)
-    p_sv = edit_sub.add_parser("suggest-visuals")
-    p_sv.add_argument("job_id")
-    p_sv.add_argument("clip", type=int)
-    p_sv.add_argument("--prefer", choices=["pexels", "gemini"], default="pexels")
-    p_rcl = edit_sub.add_parser("render-clip")
-    p_rcl.add_argument("job_id")
-    p_rcl.add_argument("clip", type=int)
-    p_tr = edit_sub.add_parser("transcript", help="whole-video words for the range picker (JSON)")
-    p_tr.add_argument("job_id")
-    p_pr = edit_sub.add_parser("proofread", help="Claude Code fixes misheard caption words (JSON)")
-    p_pr.add_argument("job_id")
-    p_pr.add_argument("clip", type=int)
-    p_tx = edit_sub.add_parser("text", help="readable transcript lines with timestamps (for the chat brain)")
-    p_tx.add_argument("job_id")
-    p_tx.add_argument("--start", type=float, default=None, help="source seconds")
-    p_tx.add_argument("--end", type=float, default=None, help="source seconds")
-    p_tx.add_argument("--find", default=None, help="only sentences containing this text")
-    p_ar = edit_sub.add_parser("add-range", help="cut a hand-picked source range into a new clip")
-    p_ar.add_argument("job_id")
-    p_ar.add_argument("start", type=float, help="source seconds")
-    p_ar.add_argument("end", type=float, help="source seconds")
-    p_ar.add_argument("--captions", choices=["classic", "beast", "hormozi", "minimal", "karaoke-pop"], default=None)
-    p_ar.add_argument("--camera", choices=["cut", "pan", "locked"], default=None)
-    p_as = edit_sub.add_parser("audio-suggest", help="suggest music/sfx for a clip (prints JSON, does not save)")
-    p_as.add_argument("job_id")
-    p_as.add_argument("clip", type=int)
-    p_edit.set_defaults(fn=cmd_edit)
-
     from .spec import cli as spec_cli
 
     spec_cli.add_parser(sub)
-
-    p_ig = sub.add_parser("ig", help="Instagram feedback loop (your own Meta app)")
-    ig_sub = p_ig.add_subparsers(dest="ig_cmd", required=True)
-    p_connect = ig_sub.add_parser("connect", help="OAuth against your own Meta app")
-    p_connect.add_argument("--app-id", required=True)
-    p_connect.add_argument("--app-secret", required=True)
-    ig_sub.add_parser("sync", help="one sync pass: media + thumbnails + insights ladder + auto-fit (JSON)")
-    ig_sub.add_parser("overview", help="everything the Loop screen renders (JSON)")
-    ig_sub.add_parser("media", help="list your recent Reels to link against")
-    p_link = ig_sub.add_parser("link", help="link a rendered clip to a posted Reel (JSON)")
-    p_link.add_argument("job_id")
-    p_link.add_argument("clip", type=int)
-    p_link.add_argument("media_id")
-    p_link.add_argument("--source", default="manual", choices=["manual", "match_confirmed"])
-    p_unlink = ig_sub.add_parser("unlink", help="remove a clip↔Reel link (JSON)")
-    p_unlink.add_argument("media_id")
-    p_reject = ig_sub.add_parser("reject", help="'not this' — never suggest this pair again (JSON)")
-    p_reject.add_argument("media_id")
-    p_reject.add_argument("job_id")
-    p_reject.add_argument("clip", type=int)
-    ig_sub.add_parser("pull", help="fetch metrics for every linked clip")
-    p_report = ig_sub.add_parser("report", help="score-vs-outcome calibration report")
-    p_report.add_argument("--metric", default="views")
-    p_ig.set_defaults(fn=cmd_ig)
 
     p_audio = sub.add_parser("audio", help="local music/SFX library")
     audio_sub = p_audio.add_subparsers(dest="audio_cmd", required=True)

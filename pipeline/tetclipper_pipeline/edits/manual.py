@@ -1,8 +1,7 @@
 """Manual clips: the user picks an exact source range instead of (or as well
 as) the auto-found moments. The range becomes one more entry in score.json
-(flagged ``manual``), then goes through the same per-clip render path as an
-edited clip: speaker-tracked camera direction for the new bounds, captions
-with loud-word emphasis, event tags.
+(flagged ``manual``); spec/build.py then directs the camera for it and builds
+its Studio spec.
 
 Needs ingest + diarize + events (the transcript, speakers and audio signals
 for the whole video). Auto-scoring is optional: on a job that never scored,
@@ -19,7 +18,6 @@ from .. import config
 from ..jobs import queue
 from ..scoring.stage import ScoreStage, _events_in, _window_pct
 from . import store
-from .render_clip import render_clip_edit
 
 MIN_SEC = 3.0
 # Shorts/Reels cap at 3 min, TikTok at 10; longer only costs render time.
@@ -29,53 +27,6 @@ MAX_SEC = 600.0
 def _stage(job_dir: Path, name: str) -> dict | None:
     path = job_dir / f"{name}.json"
     return json.loads(path.read_text())["data"] if path.exists() else None
-
-
-def transcript(job_dir: Path) -> dict:
-    """Whole-video words + speaker for the range picker."""
-    ingest = _stage(job_dir, "ingest")
-    diarize = _stage(job_dir, "diarize")
-    if not (ingest and diarize):
-        raise ValueError("This job has no transcript yet. Run it until TRANSCRIBE and SPEAKERS finish.")
-    # Prefer the job dir's own copy: a job moved between homes still plays.
-    local = job_dir / "media.mp4"
-    return {
-        "media_path": str(local) if local.exists() else ingest["media_path"],
-        "duration": float(ingest["probe"]["duration_sec"]),
-        "title": ingest.get("title"),
-        "segments": [
-            {
-                "speaker": seg.get("speaker", 0),
-                "words": [[w["word"], round(w["start"], 2), round(w["end"], 2)] for w in seg.get("words", []) if "start" in w],
-            }
-            for seg in diarize["segments"]
-        ],
-    }
-
-
-def transcript_text(job_dir: Path, start: float | None = None, end: float | None = None,
-                    find: str | None = None) -> str:
-    """Plain-text transcript for a reader (the chat brain): one line per
-    sentence as "[m:ss.s-m:ss.s] S0: text", optionally limited to a window or
-    to sentences containing `find` (case-insensitive)."""
-    data = transcript(job_dir)
-    lines = []
-    needle = find.lower() if find else None
-    for seg in data["segments"]:
-        words = seg["words"]
-        if not words:
-            continue
-        a, b = words[0][1], words[-1][2]
-        if start is not None and b < start:
-            continue
-        if end is not None and a > end:
-            continue
-        text = " ".join(w[0] for w in words)
-        if needle and needle not in text.lower():
-            continue
-        lines.append(f"[{_fmt(a)}-{_fmt(b)}] S{seg['speaker']}: {text}")
-    head = f"{data.get('title') or job_dir.name} - {_fmt(data['duration'])} long"
-    return head + "\n" + ("\n".join(lines) if lines else "(no matching lines)")
 
 
 def _fmt(t: float) -> str:
@@ -127,11 +78,9 @@ def add_range(
     emit,
     caption_preset: str | None = None,
     camera_mode: str | None = None,
-    render: bool = True,
 ) -> dict:
-    """Append the range as a clip and render it. Returns the render entry, or
-    with render=False (Studio: the clip is previewed/rendered from its spec)
-    {"clip_index": n} without touching ffmpeg."""
+    """Append the range to score.json as a clip (its spec is built next).
+    Returns {"clip_index", "start", "end"}."""
     job_dir = Path(job.dir)
     missing = [s for s in ("ingest", "diarize", "events") if not (job_dir / f"{s}.json").exists()]
     if missing:
@@ -155,12 +104,6 @@ def add_range(
     clip_idx = len(score["clips"]) - 1
     queue.write_checkpoint(job, "score", ScoreStage.schema_version, score)
 
-    # render_clip_edit keeps render.json in sync only if it exists.
-    if not (job_dir / "render.json").exists():
-        queue.write_checkpoint(job, "render", 1, {
-            "outputs": [], "emoji_ok": False, "caption_preset": settings.caption_preset,
-        })
-
     edits = store.load(job_dir)
     edit = store.edit_for_clip(job_dir, clip_idx, score["clips"][clip_idx])
     edit.caption_preset = caption_preset or edit.caption_preset
@@ -168,7 +111,5 @@ def add_range(
     edits[str(clip_idx)] = edit
     store.save(job_dir, edits)
 
-    if not render:
-        return {"clip_index": clip_idx, "start": start, "end": end}
-    emit(-1, f"Cutting {_fmt(start)}–{_fmt(end)}…")
-    return render_clip_edit(job_dir, clip_idx, emit)
+    emit(-1, f"Clip {_fmt(start)}–{_fmt(end)} added")
+    return {"clip_index": clip_idx, "start": start, "end": end}

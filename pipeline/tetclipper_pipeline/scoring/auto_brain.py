@@ -1,7 +1,6 @@
 """Answer a paused job's brain_request.json with a headless Claude Code run.
 
-The same procedure the /score-clips skill gives an interactive session, run
-with `claude -p` in the job folder: read the prompts (`brain show`), write one
+Runs `claude -p` in the job folder: read the prompts (`brain show`), write one
 answers file, store it (`brain answer`) until nothing is missing. Uses the
 user's own Claude plan; no API key.
 """
@@ -17,7 +16,7 @@ from typing import Callable
 from . import brain
 
 PIPELINE_DIR = Path(__file__).resolve().parents[2]
-SKILL = PIPELINE_DIR.parent / ".claude" / "skills" / "score-clips" / "SKILL.md"
+RULES = Path(__file__).with_name("judging.md")
 ANSWERS = "brain_answers.json"
 ALLOWED_TOOLS = [
     "Read",
@@ -29,13 +28,13 @@ ALLOWED_TOOLS = [
 
 
 def _judging_rules() -> str:
-    """The skill's judging + music sections (the calibration the app relies on)."""
+    """The calibration the scores rely on (scoring/judging.md)."""
     try:
-        text = SKILL.read_text(encoding="utf-8")
+        text = RULES.read_text(encoding="utf-8")
     except OSError:
         return ""
-    start = text.find("## Judging moments")
-    return text[start:] if start >= 0 else ""
+    i = text.find("## Judging moments")
+    return text[i:] if i >= 0 else text
 
 
 def prompt(job_id: str) -> str:
@@ -55,7 +54,7 @@ waiting for your answers; nobody is watching this run, so don't ask questions.
 
 def answer(job_dir: Path, emit: Callable[[float, str], None]) -> None:
     """Run Claude Code until the job's pending brain request is answered."""
-    from ..server.chat import _claude
+    from ..server.studio_chat import find_claude as _claude
 
     job_dir = Path(job_dir)
     request = brain.load_request(job_dir)

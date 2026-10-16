@@ -64,7 +64,7 @@ def analyze(row: dict, start: float | None, end: float | None, captions: str | N
             idx = clips[0]
         else:
             idx = manual.add_range(job, start - offset, end - offset, lambda f, m: emit("spec", f, m),
-                                   caption_preset=captions, render=False)["clip_index"]
+                                   caption_preset=captions)["clip_index"]
         spec_build.build(job.dir, idx, style=captions, emit=lambda f, m: emit("spec", f, m))
         queue.set_job_status(job.id, "done", None)
         return {"job_id": job.id, "clip": idx}

@@ -14,7 +14,6 @@ from tetclipper_pipeline import config
 from tetclipper_pipeline.audio_library import library, starter_pack
 from tetclipper_pipeline.audio_library.sources import freesound
 from tetclipper_pipeline.audio_library.starter_pack import STARTER_PACK
-from tetclipper_pipeline.edits.audio_suggest import SUGGEST_TAGS
 
 _TAG_SPLIT = re.compile(r"[^a-z0-9]+")
 
@@ -22,15 +21,6 @@ _TAG_SPLIT = re.compile(r"[^a-z0-9]+")
 def _query_words(query: str) -> set[str]:
     return {t for t in _TAG_SPLIT.split(query.lower()) if t}
 
-
-def test_every_suggest_tag_appears_in_a_starter_pack_query():
-    all_query_words: set[str] = set()
-    for query, _kind, _count in STARTER_PACK:
-        all_query_words |= _query_words(query)
-
-    all_tags = {tag for tags in SUGGEST_TAGS.values() for tag in tags}
-    missing = all_tags - all_query_words
-    assert not missing, f"SUGGEST_TAGS words with no covering starter-pack query: {missing}"
 
 
 def test_starter_pack_shape():

@@ -336,3 +336,12 @@ def test_stutters_ignore_words_already_cut():
     words = _seq("be", "be", "passive")
     spec = {**_stutter_spec(words), "cuts": [{"start": 0.0, "end": 0.3}]}
     assert stutters.find(spec)["removals"] == []
+
+
+def test_emphasis_power_words_numbers_and_loud_words():
+    from tetclipper_pipeline.spec.emphasis import Word, mark_emphasis
+
+    words = [Word("this", 0.0, 0.5), Word("is", 0.5, 1.0), Word("insane", 1.0, 1.5), Word("100", 1.5, 2.0), Word("LOUD", 2.0, 2.5)]
+    rms = [0.1] * 20 + [0.9] * 5  # grid 0.1 s: the last word is loud
+    mark_emphasis(words, rms, 0.1, clip_start=0.0)
+    assert [w.emphasized for w in words] == [False, False, True, True, True]

@@ -32,3 +32,4 @@ secrets.json
 
 # per-machine deployment pointer
 .claude/deploy-url.txt
+.claude/settings.local.json

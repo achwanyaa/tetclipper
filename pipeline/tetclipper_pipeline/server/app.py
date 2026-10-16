@@ -113,26 +113,9 @@ class Broadcaster:
 events = Broadcaster()
 
 
-# Pipeline runs alive in THIS process. A restarted server (a preempted cloud
-# container) starts empty, which is how the UI learns a run it was watching
-# is gone even though the "result" event never reached it.
-_active: set[int] = set()
-_active_lock = threading.Lock()
-
-
 def stream_pipeline(args: list[str]) -> None:
     """Spawn `tetclipper --jsonl <args>` on a thread and broadcast its lines.
     An `exited` event is published only when no `result` was seen."""
-
-    def work() -> None:
-        token = id(threading.current_thread())
-        with _active_lock:
-            _active.add(token)
-        try:
-            _run()
-        finally:
-            with _active_lock:
-                _active.discard(token)
 
     def _run() -> None:
         try:
@@ -158,10 +141,10 @@ def stream_pipeline(args: list[str]) -> None:
         if code != 0 and not saw_result:
             events.publish({"event": "exited", "code": code})
 
-    threading.Thread(target=work, daemon=True).start()
+    threading.Thread(target=_run, daemon=True).start()
 
 
-# ---------- commands (names/args match the Tauri commands) ----------
+# ---------- commands (POST /api/cmd/<name>; Studio's are in server/studio.py) ----------
 
 class CommandError(Exception):
     pass
@@ -177,95 +160,6 @@ def command(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 def _opt(flag: str, value: Any) -> list[str]:
     return [flag, str(value)] if value not in (None, "") else []
-
-
-@command
-def run_job(source: str, llm: str | None = None, captions: str | None = None,
-            language: str | None = None) -> None:
-    stream_pipeline(["run", source, *_opt("--llm", llm), *_opt("--captions", captions),
-                     *_opt("--language", language)])
-
-
-@command
-def resume_job(jobId: str, llm: str | None = None, captions: str | None = None, camera: str | None = None) -> None:
-    stream_pipeline(["resume", jobId, *_opt("--llm", llm), *_opt("--captions", captions), *_opt("--camera", camera)])
-
-
-@command
-def job_results(jobId: str) -> dict:
-    job_dir = home_dir() / "jobs" / Path(jobId).name
-    if not job_dir.exists():
-        raise CommandError(f"no job dir for {jobId}")
-
-    def stage(name: str) -> Any:
-        return (_read_json(job_dir / f"{name}.json") or {}).get("data")
-
-    return {
-        "job_id": jobId,
-        "dir": str(job_dir),
-        **{name: stage(name) for name in ("ingest", "score", "camera", "render", "events", "candidates")},
-    }
-
-
-def _render_skipped() -> bool:
-    return "render" in {s.strip() for s in os.environ.get("TETCLIPPER_SKIP_STAGES", "").split(",")}
-
-
-@command
-def chat_history(jobId: str) -> dict:
-    from . import chat
-
-    job_dir = home_dir() / "jobs" / Path(jobId).name
-    return {**chat.history(job_dir), "available": chat.available()}
-
-
-@command
-def chat_send(jobId: str, message: str) -> None:
-    from . import chat
-
-    job_dir = home_dir() / "jobs" / Path(jobId).name
-    ingest = (_read_json(job_dir / "ingest.json") or {}).get("data") or {}
-    if not ingest:
-        raise CommandError("This video hasn't been transcribed yet.")
-    meta = {"title": ingest.get("title"), "duration": (ingest.get("probe") or {}).get("duration_sec")}
-    try:
-        chat.send(job_dir, meta, message.strip(), events.publish)
-    except RuntimeError as err:
-        raise CommandError(str(err)) from err
-
-
-@command
-def chat_reset(jobId: str) -> None:
-    from . import chat
-
-    chat.reset(home_dir() / "jobs" / Path(jobId).name)
-
-
-@command
-def pipeline_active() -> dict:
-    """Whether any pipeline run is alive on this server right now."""
-    with _active_lock:
-        return {"running": len(_active)}
-
-
-@command
-def list_job_dirs() -> list[dict]:
-    jobs_dir = home_dir() / "jobs"
-    out = []
-    for entry in jobs_dir.iterdir() if jobs_dir.exists() else []:
-        if not entry.is_dir():
-            continue
-        ingest = _read_json(entry / "ingest.json") or {}
-        rendered = (entry / "render.json").exists()
-        out.append({
-            "id": entry.name,
-            "title": (ingest.get("data") or {}).get("title"),
-            "ingested": (entry / "ingest.json").exists(),
-            "rendered": rendered,
-            # Hybrid hosting: analysed here, rendered on the user's machine.
-            "pull_only": not rendered and _render_skipped() and (entry / "camera.json").exists(),
-        })
-    return sorted(out, key=lambda j: j["id"], reverse=True)
 
 
 def _secrets() -> dict:
@@ -284,15 +178,7 @@ def _merge_secret(key: str, value: Any) -> bool:
     return True
 
 
-@command
-def save_gemini_key(key: str) -> bool:
-    return _merge_secret("gemini_api_key", key)
-
-
-@command
-def save_pexels_key(key: str) -> bool:
-    return _merge_secret("pexels_api_key", key)
-
+# ---- music library (Studio's Music tab) ----
 
 @command
 def save_freesound_key(key: str) -> bool:
@@ -311,65 +197,16 @@ def audio_keys_status() -> dict:
 
 
 @command
-def get_setup_state() -> dict:
-    return {
-        "has_gemini_key": bool(_secrets().get("gemini_api_key")),
-        "onboarded": (home_dir() / "onboarded").exists(),
-    }
+def audio_list(kind: str | None = None, query: str | None = None) -> Any:
+    return run_cli_json(["audio", "list", "--json", *_opt("--kind", kind), *_opt("--query", query)])
 
 
 @command
-def mark_onboarded() -> None:
-    home_dir().mkdir(parents=True, exist_ok=True)
-    (home_dir() / "onboarded").write_text("1")
+def run_audio_bootstrap() -> None:
+    stream_pipeline(["audio", "bootstrap"])
 
 
-@command
-def check_ollama() -> dict:
-    import urllib.request
-
-    try:
-        with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=3) as r:
-            data = json.load(r)
-    except Exception:
-        return {"running": False, "models": []}
-    return {"running": True, "models": [m.get("name") for m in data.get("models", []) if m.get("name")]}
-
-
-@command
-def edit_tool(args: list[str]) -> Any:
-    return run_cli_json(["edit", *args])
-
-
-@command
-def run_edit_render(jobId: str, clip: int) -> None:
-    stream_pipeline(["edit", "render-clip", jobId, str(clip)])
-
-
-@command
-def save_clip_edits(jobId: str, edits: dict) -> None:
-    path = home_dir() / "jobs" / Path(jobId).name / "clip_edits.json"
-    current = _read_json(path, {}) or {}
-    current.update(edits)  # one clip at a time; keep the others
-    _write_json(path, current)
-
-
-@command
-def job_transcript(jobId: str) -> Any:
-    result = run_cli_json(["edit", "transcript", jobId])
-    if not result.get("ok"):
-        raise CommandError(result.get("error", "no transcript"))
-    return result
-
-
-@command
-def add_clip_range(jobId: str, start: float, end: float, captions: str | None = None,
-                   camera: str | None = None) -> None:
-    stream_pipeline([
-        "edit", "add-range", jobId, f"{start:.3f}", f"{end:.3f}",
-        *_opt("--captions", captions), *_opt("--camera", camera),
-    ])
-
+# ---- Telegram delivery setup (sending: studio_telegram) ----
 
 @command
 def telegram_status() -> Any:
@@ -384,166 +221,6 @@ def telegram_save_token(token: str) -> Any:
 @command
 def telegram_link() -> Any:
     return run_cli_json(["telegram", "link"])
-
-
-@command
-def telegram_send(jobId: str, clip: int, caption: str | None = None) -> Any:
-    return run_cli_json(["telegram", "send", jobId, str(clip), *_opt("--caption", caption)])
-
-
-@command
-def server_info() -> dict:
-    """What this server sees: handy when a hosted deployment misbehaves."""
-    from .. import config
-
-    return {
-        "home": str(home_dir()),
-        "dist": str(DIST_DIR),
-        "dist_exists": DIST_DIR.exists(),
-        "cli": cli_command([]),
-        "device": config.compute_device(),
-        "auth": bool(WEB_TOKEN),
-    }
-
-
-@command
-def job_manifest(jobId: str) -> dict:
-    """Everything a remote `tetclipper pull` needs: the job row and its files."""
-    from ..jobs import queue
-
-    job = queue.get_job(Path(jobId).name)
-    if job is None:
-        raise CommandError(f"no job {jobId}")
-    files = [
-        {"path": p.relative_to(job.dir).as_posix(), "size": p.stat().st_size}
-        for p in sorted(job.dir.rglob("*")) if p.is_file()
-    ]
-    return {
-        "home": home_dir().as_posix(),
-        "job": {"id": job.id, "source_type": job.source_type, "source": job.source,
-                "settings_json": job.settings_json, "title": job.title},
-        "files": files,
-    }
-
-
-@command
-def remote_jobs() -> dict:
-    """Jobs on the hosted deployment (empty when none is configured)."""
-    from ..jobs import remote
-
-    if not remote.remote_url():
-        return {"configured": False, "jobs": []}
-    try:
-        return {"configured": True, "url": remote.remote_url(), "jobs": remote.list_remote()}
-    except Exception as err:  # noqa: BLE001 — offline / token problems show as a note
-        return {"configured": True, "url": remote.remote_url(), "jobs": [], "error": str(err)}
-
-
-@command
-def cut_range(source: str, start: float, end: float, captions: str | None = None,
-              camera: str | None = None, language: str | None = None) -> None:
-    """Range mode: fetch only [start, end] and cut it (streams pipeline-event)."""
-    stream_pipeline([
-        "cut", source, f"{start:.3f}", f"{end:.3f}",
-        *_opt("--captions", captions), *_opt("--camera", camera), *_opt("--language", language),
-    ])
-
-
-@command
-def push_job(source: str, llm: str | None = None, captions: str | None = None) -> None:
-    """Hybrid: download here, upload to the hosted GPU and start it there."""
-    stream_pipeline(["push", source, *_opt("--llm", llm), *_opt("--captions", captions)])
-
-
-@command
-def pull_job(jobId: str) -> None:
-    """Hybrid: pull a hosted job here and render it locally (streams events)."""
-    stream_pipeline(["pull", jobId, "--render"])
-
-
-@command
-def brain_show(jobId: str) -> dict:
-    """The Claude Code handoff over HTTP (hosted jobs): the pending request
-    rendered as text, or null when the job isn't waiting."""
-    from ..scoring import brain
-
-    request = brain.load_request(home_dir() / "jobs" / Path(jobId).name)
-    return {"waiting": request is not None, "text": brain.render_request(request) if request else None}
-
-
-@command
-def brain_answer(jobId: str, answers: dict) -> dict:
-    from ..scoring import brain
-
-    return brain.apply_answers(home_dir() / "jobs" / Path(jobId).name, answers)
-
-
-@command
-def run_audio_bootstrap() -> None:
-    stream_pipeline(["audio", "bootstrap"])
-
-
-@command
-def audio_import(paths: list[str], kind: str) -> Any:
-    return run_cli_json(["audio", "import", *paths, "--kind", kind])
-
-
-@command
-def audio_list(kind: str | None = None, query: str | None = None) -> Any:
-    return run_cli_json(["audio", "list", "--json", *_opt("--kind", kind), *_opt("--query", query)])
-
-
-@command
-def audio_remove(id: str) -> Any:
-    return run_cli_json(["audio", "remove", id])
-
-
-@command
-def audio_search(query: str, source: str, kind: str, maxDuration: float | None = None,
-                 allowAttribution: bool = False) -> Any:
-    return run_cli_json([
-        "audio", "search", query, "--source", source, "--kind", kind, "--json",
-        *_opt("--max-duration", maxDuration), *(["--allow-attribution"] if allowAttribution else []),
-    ])
-
-
-@command
-def audio_fetch(source: str, sourceId: str) -> Any:
-    return run_cli_json(["audio", "fetch", source, sourceId])
-
-
-@command
-def audio_suggest(jobId: str, clip: int) -> Any:
-    return run_cli_json(["edit", "audio-suggest", jobId, str(clip)])
-
-
-@command
-def ig_status() -> dict:
-    data = _read_json(home_dir() / "instagram.json")
-    if not data:
-        return {"connected": False}
-    return {"connected": True, "username": data.get("username"), "obtained_at": data.get("token_obtained_at")}
-
-
-@command
-def ig_connect(appId: str, appSecret: str) -> str:
-    raise CommandError("Instagram connect needs the desktop app (it catches a localhost OAuth callback).")
-
-
-@command
-def ig_tool(args: list[str]) -> Any:
-    return run_cli_json(["ig", *args])
-
-
-@command
-def export_clip(path: str, title: str | None = None) -> str:
-    # The browser downloads it; hand back the URL instead of copying to ~/Downloads.
-    return f"/files?path={path}&download=1"
-
-
-@command
-def check_update() -> dict:
-    return {"current": "web", "latest": None, "update_available": False, "url": ""}
 
 
 # ---------- HTTP ----------

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -22,9 +23,20 @@ from pathlib import Path
 from typing import Callable
 
 from ..spec import store
-from .chat import _claude
 
 PIPELINE_DIR = Path(__file__).resolve().parents[2]
+
+
+def find_claude() -> str | None:
+    found = os.environ.get("TETCLIPPER_CLAUDE") or shutil.which("claude")
+    if found and found.lower().endswith(".cmd"):
+        # npm's Windows shim; call the real binary so cmd.exe never re-parses
+        # our arguments (quotes, newlines and & would break).
+        exe = Path(found).parent / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+        if exe.exists():
+            return str(exe)
+    return found
+
 MAX_TURNS = 30
 ALLOWED_TOOLS = [
     "Read",
@@ -225,7 +237,7 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
     """Start one chat turn on a thread. `on_turn_end` validates the spec and
     returns problems (it restores the last good version itself)."""
     key = f"{job_dir.name}/{clip}"
-    claude = _claude()
+    claude = find_claude()
     if claude is None:
         raise RuntimeError("Studio chat needs the Claude Code CLI installed and logged in on this machine.")
     with _lock:

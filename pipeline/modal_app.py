@@ -42,12 +42,6 @@ image = (
     .env({
         "TETCLIPPER_HOME": HOME,
         "TETCLIPPER_DEVICE": "cuda",
-        # Debian's ffmpeg carries the NVENC encoder; the renderer probes it and
-        # falls back to libx264 (which is why cpu= below is generous).
-        "TETCLIPPER_VCODEC": "h264_nvenc",
-        # Hybrid: the GPU box analyses and directs; your own machine renders
-        # (`tetclipper pull <job> --render`). Drop this to render here too.
-        "TETCLIPPER_SKIP_STAGES": "render",
         # The web shell spawns this instead of `uv run tetclipper` (no uv in the image).
         "TETCLIPPER_CLI": "python -m tetclipper_pipeline.cli",
         "TETCLIPPER_STUDIO_DIST": "/root/studio-dist",

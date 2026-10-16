@@ -72,7 +72,7 @@ def _fake_whisperx(load_errors: dict[str, str], transcribe_errors: dict[str, str
     mod.loads: list[str] = []
     mod.batches: list[int] = []
 
-    def load_model(name, device, compute_type, vad_method):
+    def load_model(name, device, compute_type, vad_method, asr_options=None):
         mod.loads.append(name)
         if name in load_errors:
             raise RuntimeError(load_errors[name])

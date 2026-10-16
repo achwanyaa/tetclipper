@@ -146,7 +146,7 @@ def test_net_sync_is_skipped_once_the_pipeline_group_is_in(tmp_path, monkeypatch
     assert cli._ensure_net_deps(False, lambda *_: None) == (True, None)
 
 
-@pytest.mark.parametrize("argv", [["ig", "overview"], ["audio", "list", "--json"]])
+@pytest.mark.parametrize("argv", [["audio", "list", "--json"]])
 def test_loop_and_library_commands_answer_json_when_the_net_sync_fails(argv, tmp_path, monkeypatch, capsys):
     import json
 
@@ -159,7 +159,7 @@ def test_loop_and_library_commands_answer_json_when_the_net_sync_fails(argv, tmp
     assert "no network" in payload["error"]
 
 
-@pytest.mark.parametrize("argv", [["ig", "overview"], ["audio", "list", "--json"]])
+@pytest.mark.parametrize("argv", [["audio", "list", "--json"]])
 def test_loop_and_library_commands_sync_net_deps_before_importing(argv, tmp_path, monkeypatch, capsys):
     import json
 

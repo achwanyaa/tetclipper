@@ -145,7 +145,7 @@ def studio_clip(jobId: str, clip: int = 0) -> dict:
         "spec": spec,
         "history": store.history(job_dir, clip),
         "chat": {**studio_chat.history(job_dir, clip), "busy": studio_chat.busy(job_dir, clip),
-                 "available": studio_chat._claude() is not None},  # noqa: SLF001
+                 "available": studio_chat.find_claude() is not None},
         "render": render,
     }
 

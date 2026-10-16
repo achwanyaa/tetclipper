@@ -4,7 +4,7 @@ The spec is the one document the Studio editor previews, Claude Code edits
 and the Remotion renderer renders. Everything here is derived from stage
 checkpoints the pipeline already writes:
 
-  words      ← diarize.json (+ emphasis from captions/ass.py, + word_edits)
+  words      ← diarize.json (+ emphasis from spec/emphasis.py, + word_edits)
   crop       ← the camera director's per-frame trajectory, with punch-in zoom
                divided back out and the path simplified to keyframes
   effects    ← the director's punch-ins, as editable `punch-in` effects
@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 
 from .. import config
-from ..captions import ass as ass_mod
+from . import emphasis
 from . import store
 from .schema import validate
 
@@ -125,7 +125,7 @@ def words_for(job_dir: Path, start: float, end: float, word_edits: dict[str, str
 def words_and_scores(job_dir: Path, start: float, end: float,
                      word_edits: dict[str, str]) -> tuple[list[dict], dict[int, float]]:
     """words_for() plus each word's alignment score, by index (for doubts)."""
-    from ..edits.timeline import word_key
+    from ..edits.store import word_key
 
     diarize = _stage(job_dir, "diarize")
     events = _stage(job_dir, "events")
@@ -133,10 +133,10 @@ def words_and_scores(job_dir: Path, start: float, end: float,
         w for seg in diarize["segments"] for w in seg.get("words", [])
         if w.get("start") is not None and start <= w["start"] < end
     ]
-    flags = [ass_mod.Word(text=w["word"], start=w["start"] - start, end=w["end"] - start) for w in raw]
+    flags = [emphasis.Word(text=w["word"], start=w["start"] - start, end=w["end"] - start) for w in raw]
     if flags:
         curves = json.loads(Path(events["curves_path"]).read_text(encoding="utf-8"))
-        ass_mod.mark_emphasis(flags, curves["rms"], float(curves["grid_sec"]), clip_start=start)
+        emphasis.mark_emphasis(flags, curves["rms"], float(curves["grid_sec"]), clip_start=start)
     words = []
     scores: dict[int, float] = {}
     for w, flagged in zip(raw, flags):
@@ -184,10 +184,9 @@ def _trajectory(job_dir: Path, clip_idx: int, edit, score_clip: dict, settings, 
         cached = json.loads(cache.read_text(encoding="utf-8"))
         if abs(cached.get("start", -1) - edit.start) < 0.05 and abs(cached.get("end", -1) - edit.end) < 0.05:
             return cached
-    from ..edits.render_clip import _trajectory_for  # noqa: PLC0415 — heavy camera imports
+    from ..camera.clip import direct  # heavy camera imports, only when needed
 
-    emit(-1, "Directing the camera…")
-    traj = _trajectory_for(job_dir, clip_idx, edit, score_clip, settings, emit)
+    traj = direct(job_dir, edit.start, edit.end, edit.camera_mode, settings, emit)
     traj = {**traj, "start": edit.start, "end": edit.end}
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps(traj), encoding="utf-8")

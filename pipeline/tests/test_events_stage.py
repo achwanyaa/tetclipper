@@ -145,8 +145,14 @@ def test_corrupted_panns_checkpoint_raises_stage_error_not_uncaught(tmp_path, mo
         pytest.fail("expected StageError")
 
 
+def _range_settings_json() -> str:
+    data = json.loads(_settings_json())
+    data["section"] = [10.0, 40.0]
+    return json.dumps(data)
+
+
 def test_cli_execute_reports_panns_crash_gracefully_not_uncaught(tmp_path, monkeypatch):
-    """End-to-end through cli._execute(): a non-StageError from EventsStage
+    """End-to-end through cli._run_range(): a non-StageError from EventsStage
     (this cluster's corrupted-checkpoint torch.load() failure, simulated
     here without a real checkpoint) must produce a final
     {"ok": False, ...} result, never an uncaught exception escaping
@@ -168,9 +174,9 @@ def test_cli_execute_reports_panns_crash_gracefully_not_uncaught(tmp_path, monke
     # nothing about the crash path it exists to cover.
     monkeypatch.setattr(cli, "_ensure_pipeline_deps", lambda jsonl, emit: (True, None))
 
-    job = queue.create_job("file", "/tmp/does-not-matter.mp4", _settings_json())
-    # _execute() must not raise -- that's the crash this cluster is about.
-    code = cli._execute(job, jsonl=False)
+    job = queue.create_job("file", "/tmp/does-not-matter.mp4", _range_settings_json())
+    # _run_range() must not raise -- that's the crash this cluster is about.
+    code = cli._run_range(job, jsonl=False)
     assert code == 1  # CLI signals failure via exit code...
     fetched = queue.get_job(job.id)
     assert fetched.status == "failed"
@@ -188,8 +194,8 @@ def test_cli_execute_marks_job_failed_when_dep_bootstrap_fails(tmp_path, monkeyp
         cli, "_ensure_pipeline_deps", lambda jsonl, emit: (False, "network unreachable")
     )
 
-    job = queue.create_job("file", "/tmp/does-not-matter.mp4", _settings_json())
-    assert cli._execute(job, jsonl=False) == 1
+    job = queue.create_job("file", "/tmp/does-not-matter.mp4", _range_settings_json())
+    assert cli._run_range(job, jsonl=False) == 1
     fetched = queue.get_job(job.id)
     assert fetched.status == "failed"
     assert "network unreachable" in fetched.error
