@@ -46,6 +46,17 @@ def add_parser(sub) -> None:
 
     p.set_defaults(fn=run)
 
+    p_find = sub.add_parser("find", help="auto-find the best moments (Claude Code judges) and make Studio clips")
+    p_find.add_argument("source", help="YouTube URL, video file, or an existing job id")
+    p_find.add_argument("start", nargs="?", default=None, help="optional: only search from here (12:30)")
+    p_find.add_argument("end", nargs="?", default=None, help="optional: …to here (45:00)")
+    p_find.add_argument("--top", type=int, default=5, help="how many clips to make (default 5)")
+    p_find.add_argument("--captions", choices=build_mod.CAPTION_STYLES, default=None)
+    p_find.add_argument("--language", default="auto", help="speech language: en, sw, … or auto")
+    p_find.add_argument("--cloud", dest="cloud", action="store_true", default=None)
+    p_find.add_argument("--local", dest="cloud", action="store_false")
+    p_find.set_defaults(fn=run_find)
+
 
 def _summary(job_dir: Path, clip_idx: int, spec: dict) -> dict:
     src = spec["source"]
@@ -140,3 +151,34 @@ def run(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": True, **_summary(job_dir, args.clip, spec)}))
         return 0
     return 2
+
+
+def run_find(args: argparse.Namespace) -> int:
+    from ..cli import _emit_result, _ensure_pipeline_deps, _parse_clock, _progress_printer
+    from ..cloud import client as cloud_client
+    from ..jobs import queue
+    from . import find
+
+    emit = _progress_printer(args.jsonl)
+    section = None
+    if args.start is not None and args.end is not None:
+        section = [_parse_clock(args.start), _parse_clock(args.end)]
+        if section[1] - section[0] < 60:
+            _emit_result(args.jsonl, {"ok": False, "error": "Search at least a minute of video."})
+            return 2
+    job = find.create(args.source, section, args.captions, args.language)
+    if args.jsonl:
+        print(json.dumps({"event": "job", "job_id": job.id, "dir": str(job.dir)}), flush=True)
+    ok, err = _ensure_pipeline_deps(args.jsonl, emit)
+    if not ok:
+        _emit_result(args.jsonl, {"ok": False, "job_id": job.id, "error": str(err)})
+        return 1
+    cloud = args.cloud if args.cloud is not None else cloud_client.available()
+    try:
+        clips = find.run(job, args.top, args.captions, cloud, emit)
+    except Exception as err:  # noqa: BLE001 — every failure must reach the app
+        queue.set_job_status(job.id, "failed", str(err))
+        _emit_result(args.jsonl, {"ok": False, "job_id": job.id, "error": str(err)})
+        return 1
+    _emit_result(args.jsonl, {"ok": True, "job_id": job.id, "clips": clips})
+    return 0

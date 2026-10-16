@@ -152,3 +152,25 @@ def test_total_frames_matches_the_composition_timeline(source, cuts, intro, fram
     ranges = chunk_ranges(frames)
     assert ranges[0][0] == 0 and ranges[-1][1] == frames - 1
     assert all(b + 1 == a for (_, b), (a, _) in zip(ranges, ranges[1:]))
+
+
+def test_music_gains_match_the_composition():
+    from tetclipper_pipeline.spec.music import frame_gains
+
+    spec = {
+        "source": {"src": "m.mp4", "start": 5, "end": 12},
+        "intro": {"src": "i.jpg", "duration": 1},
+        "cuts": [{"start": 7, "end": 8}],
+        "words": [
+            {"text": "a", "start": 5.2, "end": 5.6}, {"text": "b", "start": 5.8, "end": 6.3},
+            {"text": "c", "start": 8.5, "end": 9.0}, {"text": "d", "start": 10.4, "end": 11.1},
+        ],
+        "music": {"src": "x.mp3", "volume": 0.3, "duck": 0.4, "fadeIn": 0.5, "fadeOut": 1},
+    }
+    g = frame_gains(spec)
+    # reference values from studio/composition/src/music.ts musicGains()
+    assert len(g) == 210
+    picks = [round(g[i], 6) for i in (0, 10, 31, 40, 45, 60, 100, 150, len(g) - 1)]
+    assert picks == [0, 0.2, 0.3, 0.12, 0.12, 0.12, 0.3, 0.3, 0]
+    assert round(sum(g), 6) == 41.04
+    assert validate({**_spec(), "music": spec["music"]}) == []

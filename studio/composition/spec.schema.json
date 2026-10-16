@@ -100,6 +100,59 @@
           },
           "default": []
         },
+        "music": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "src": {
+                  "type": "string"
+                },
+                "volume": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "default": 0.25
+                },
+                "duck": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "default": 0.35
+                },
+                "offset": {
+                  "type": "number",
+                  "minimum": 0,
+                  "default": 0
+                },
+                "fadeIn": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 10,
+                  "default": 1
+                },
+                "fadeOut": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 10,
+                  "default": 1.5
+                },
+                "loop": {
+                  "type": "boolean",
+                  "default": true
+                }
+              },
+              "required": [
+                "src"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "words": {
           "type": "array",
           "items": {

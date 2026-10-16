@@ -881,7 +881,7 @@ def main(argv: list[str] | None = None) -> int:
     p_push.add_argument("--captions", default=None)
     p_push.set_defaults(fn=cmd_push)
 
-    p_serve = sub.add_parser("serve", help="run the web UI + API (browser instead of the desktop app)")
+    p_serve = sub.add_parser("serve", help="run Studio (http://localhost:8765/studio/) + the API")
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8765)
     p_serve.set_defaults(fn=cmd_serve)

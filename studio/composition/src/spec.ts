@@ -98,6 +98,19 @@ export const clipSpecSchema = z.object({
     .nullable()
     .default(null),
   cuts: z.array(cutSchema).default([]),
+  // Music bed under the whole output (intro included). Ducks while anyone speaks.
+  music: z
+    .object({
+      src: z.string(),
+      volume: fraction.default(0.25),
+      duck: fraction.default(0.35), // multiplier on `volume` while speech plays
+      offset: seconds.default(0), // start this far into the track
+      fadeIn: z.number().min(0).max(10).default(1),
+      fadeOut: z.number().min(0).max(10).default(1.5),
+      loop: z.boolean().default(true)
+    })
+    .nullable()
+    .default(null),
   words: z.array(wordSchema).default([]),
   captions: z
     .object({
@@ -132,6 +145,7 @@ export type CropKeyframe = z.infer<typeof cropKeyframeSchema>
 export type Effect = z.infer<typeof effectSchema>
 export type EffectInput = z.input<typeof effectSchema>
 export type Cut = z.infer<typeof cutSchema>
+export type Music = NonNullable<z.infer<typeof clipSpecSchema>['music']>
 export type ClipSpec = z.infer<typeof clipSpecSchema>
 export type ClipSpecInput = z.input<typeof clipSpecSchema>
 export type CaptionStyle = (typeof CAPTION_STYLES)[number]

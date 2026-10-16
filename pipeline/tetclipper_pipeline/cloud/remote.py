@@ -36,9 +36,12 @@ def _threaded(work: Callable[[Callable[[str, float, str], None]], dict]) -> Iter
             return
 
 
-def analyze(row: dict, start: float, end: float, captions: str | None) -> Iterator[dict]:
-    """ASR → diarize → events → camera → spec for a range job whose ingest
-    (media.mp4, audio16k.wav, ingest.json) the PC already uploaded."""
+def analyze(row: dict, start: float | None, end: float | None, captions: str | None,
+            stages: list[str] | None = None) -> Iterator[dict]:
+    """Run analysis stages for a job whose ingest (media.mp4, audio16k.wav,
+    ingest.json) the PC uploaded. Range mode (start/end given): ASR → diarize →
+    events → camera → clip spec. Find mode (stages given, no range): just those
+    stages (…, candidates); scoring happens on the PC where Claude Code is."""
 
     def work(emit) -> dict:
         from .. import cli
@@ -49,10 +52,12 @@ def analyze(row: dict, start: float, end: float, captions: str | None) -> Iterat
 
         queue.import_job(row["id"], row["source_type"], row["source"], row["settings_json"], row.get("title"))
         job = queue.get_job(row["id"])
-        stages = [s for s in cli._stages() if s.name in ("ingest", "asr", "diarize", "events")]  # noqa: SLF001
-        results = queue.run_stages(job, stages, emit)
-        offset = float(results["ingest"].get("section_offset", 0.0))
+        wanted = stages or ["ingest", "asr", "diarize", "events"]
+        results = queue.run_stages(job, [s for s in cli._stages() if s.name in wanted], emit)  # noqa: SLF001
         job = queue.get_job(row["id"]) or job
+        if start is None or end is None:
+            return {"job_id": job.id}
+        offset = float(results["ingest"].get("section_offset", 0.0))
         clips = spec_store.list_clips(job.dir)
         if clips:
             idx = clips[0]
@@ -66,46 +71,53 @@ def analyze(row: dict, start: float, end: float, captions: str | None) -> Iterat
     return _threaded(work)
 
 
-FPS = 30
+def build_spec(job_id: str, clip: int, captions: str | None) -> dict:
+    """Camera + spec for one scored clip (fanned out across containers)."""
+    from ..config import jobs_dir
+    from ..spec import build as spec_build
+
+    spec_build.build(jobs_dir() / job_id, clip, style=captions)
+    return {"clip": clip}
 
 
-def _round(x: float) -> int:
-    return int(x + 0.5)  # JS Math.round, as in studio/composition/src/timeline.ts
+from ..spec.timeline import FPS, segments, total_frames  # noqa: E402 — shared with spec/music.py
 
 
-def segments(spec: dict, fps: int = FPS) -> tuple[int, list[tuple[float, int]]]:
-    """(intro frames, [(source start, frames)]) exactly as buildTimeline() in
-    studio/composition/src/timeline.ts: the source range minus merged cuts."""
-    src = spec["source"]
-    a, b = float(src["start"]), float(src["end"])
-    intro = spec.get("intro")
-    intro_frames = _round(float(intro.get("duration", 2)) * fps) if intro else 0
-    cuts = sorted(
-        (max(a, min(c["start"], c["end"])), min(b, max(c["start"], c["end"])))
-        for c in spec.get("cuts", [])
+RATE = 48000
+
+
+def _mix_music(spec: dict, job_dir: Path, speech: Path, out: Path, total: int) -> None:
+    """speech.wav + the music bed with the preview's per-frame gains → out."""
+    import numpy as np
+
+    from ..spec.music import frame_gains, music_settings
+
+    m = music_settings(spec)
+    duration = total / FPS
+    decode = subprocess.run(
+        ["ffmpeg", "-loglevel", "error", *(["-stream_loop", "-1"] if m["loop"] else []),
+         "-ss", f"{float(m['offset']):.3f}", "-i", str(job_dir / m["src"]), "-t", f"{duration:.6f}",
+         "-f", "f32le", "-ac", "2", "-ar", str(RATE), "-"],
+        capture_output=True,
     )
-    merged: list[list[float]] = []
-    for c0, c1 in cuts:
-        if c1 <= c0:
-            continue
-        if merged and c0 <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], c1)
-        else:
-            merged.append([c0, c1])
-    out: list[tuple[float, int]] = []
-    cursor = a
-    for c0, c1 in [*merged, [b, b]]:
-        n = _round((c0 - cursor) * fps)
-        if n >= 1:
-            out.append((cursor, n))
-        cursor = c1
-    return intro_frames, out
-
-
-def total_frames(spec: dict, fps: int = FPS) -> int:
-    """Output length in frames: intro + every kept segment."""
-    intro, segs = segments(spec, fps)
-    return max(1, intro + sum(n for _, n in segs))
+    if decode.returncode != 0:
+        raise RuntimeError(decode.stderr.decode(errors="replace")[-400:])
+    pcm = np.frombuffer(decode.stdout, dtype=np.float32).reshape(-1, 2).copy()
+    want = int(round(duration * RATE))
+    if len(pcm) < want:  # a short, non-looping track: silence after it ends
+        pcm = np.vstack([pcm, np.zeros((want - len(pcm), 2), dtype=np.float32)])
+    gains = np.repeat(np.asarray(frame_gains(spec), dtype=np.float32), RATE // FPS)
+    k = min(len(pcm), len(gains))
+    pcm = pcm[:k] * gains[:k, None]
+    raw = out.with_suffix(".music.f32")
+    raw.write_bytes(pcm.astype(np.float32).tobytes())
+    mix = subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(speech), "-f", "f32le", "-ar", str(RATE), "-ac", "2",
+         "-i", str(raw), "-filter_complex", "amix=inputs=2:normalize=0:duration=first", "-c:a", "pcm_s16le", str(out)],
+        capture_output=True, text=True,
+    )
+    if mix.returncode != 0:
+        raise RuntimeError(mix.stderr[-400:])
 
 
 def chunk_ranges(total: int, max_chunks: int = 40, min_frames: int = 60) -> list[tuple[int, int]]:
@@ -182,11 +194,18 @@ def render(job_dir: str, clip: int, chunk_map: Callable) -> Iterator[dict]:
             run = subprocess.run(
                 ["ffmpeg", "-y", "-loglevel", "error", "-i", str(media), "-filter_complex",
                  ";".join(parts) + ";" + chain + delay, "-map", "[out]", "-ar", "48000", "-ac", "2",
-                 "-t", f"{total / FPS:.6f}", str(tmp / "audio.wav")],
+                 "-t", f"{total / FPS:.6f}", str(tmp / "speech.wav")],
                 capture_output=True, text=True,
             )
             if run.returncode != 0:
                 audio_err.append(run.stderr[-600:])
+            elif spec.get("music"):
+                try:
+                    _mix_music(spec, Path(job_dir), tmp / "speech.wav", tmp / "audio.wav", total)
+                except Exception as err:  # noqa: BLE001
+                    audio_err.append(f"music: {err}")
+            else:
+                (tmp / "speech.wav").replace(tmp / "audio.wav")
             timings["audio"] = round(time.time() - a0, 1)
 
         audio_thread = threading.Thread(target=audio, daemon=True)

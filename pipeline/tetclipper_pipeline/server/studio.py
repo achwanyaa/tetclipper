@@ -8,6 +8,7 @@ is pushed to the browser as {"event": "spec", job_id, clip, spec}.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import threading
 import time
@@ -18,8 +19,9 @@ from ..spec import store
 from . import studio_chat
 from .app import CommandError, _read_json, _SAFE_NAME, command, events, home_dir, stream_pipeline
 
-STUDIO_DIST = Path(__file__).resolve().parents[3] / "studio" / "editor" / "dist"
+STUDIO_DIST = Path(os.environ.get("TETCLIPPER_STUDIO_DIST") or Path(__file__).resolve().parents[3] / "studio" / "editor" / "dist")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 
 
 def _job_dir(job_id: str) -> Path:
@@ -107,6 +109,7 @@ def studio_jobs() -> list[dict]:
         settings = _read_json(job_dir / "settings.json") or {}
         if not clips and not settings.get("section"):
             continue
+        scored = ((_read_json(job_dir / "score.json") or {}).get("data") or {}).get("clips") or []
         out.append({
             "id": job_dir.name,
             "title": _title(job_dir),
@@ -116,6 +119,9 @@ def studio_jobs() -> list[dict]:
                     "clip": c,
                     "rendered": (store.clip_dir(job_dir, c) / "render.mp4").exists(),
                     "style": (store.load(job_dir, c) or {}).get("captions", {}).get("style"),
+                    # auto-found moments carry the judge's score and summary
+                    "score": None if c >= len(scored) or scored[c].get("manual") else scored[c].get("score"),
+                    "summary": None if c >= len(scored) or scored[c].get("manual") else scored[c].get("summary"),
                 }
                 for c in clips
             ],
@@ -190,15 +196,34 @@ def studio_cut(source: str, start: float, end: float, captions: str | None = Non
 
 
 @command
+def studio_find(source: str, start: float | None = None, end: float | None = None, top: int = 5,
+                captions: str | None = None, language: str | None = None, cloud: bool | None = None) -> None:
+    """Auto-find the best moments (Claude Code judges) in a link, a section of
+    it, or an existing job (source = job id), and make the top ones clips."""
+    args = ["find", source]
+    if start is not None and end is not None:
+        args += [str(start), str(end)]
+    args += ["--top", str(top)]
+    if captions:
+        args += ["--captions", captions]
+    if language:
+        args += ["--language", language]
+    if cloud is not None:
+        args.append("--cloud" if cloud else "--local")
+    stream_pipeline(args)
+
+
+@command
 def studio_attach(jobId: str, clip: int, path: str) -> dict:
-    """Copy an uploaded image into the clip's assets/; returns its spec src."""
+    """Copy an uploaded image or audio file (or a library track) into the
+    clip's assets/; returns its spec src."""
     job_dir = _job_dir(jobId)
     src = Path(path).resolve()
     home = home_dir().resolve()
     if home not in src.parents or not src.is_file():
         raise CommandError("upload not found")
-    if src.suffix.lower() not in IMAGE_EXTS:
-        raise CommandError("Use a JPG, PNG, WebP or GIF image.")
+    if src.suffix.lower() not in IMAGE_EXTS | AUDIO_EXTS:
+        raise CommandError("Use an image (JPG, PNG, WebP, GIF) or audio (MP3, WAV, M4A, OGG, FLAC).")
     assets = store.clip_dir(job_dir, clip) / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     stem = _SAFE_NAME.sub("_", src.stem) or "image"

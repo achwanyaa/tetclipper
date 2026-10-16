@@ -1,8 +1,8 @@
 # tetclipper
 
-**Long video in. Scored vertical clips out. Everything runs on your machine.**
+**Long video in. Vertical clips out, edited by chatting with Claude Code.**
 
-tetclipper is an open-source (AGPL-3.0) desktop app that takes a YouTube URL or a
+tetclipper is an open-source (AGPL-3.0) clip studio that takes a YouTube URL or a
 horizontal video file and produces vertical 9:16 clips with:
 
 - **Smart camera** — active-speaker-tracked crop paths, smoothed motion, hard cuts
@@ -66,117 +66,74 @@ it, and `npm run gallery` to re-render the caption style stills.
 
 ## Status
 
-Working end to end: hour-long podcast in, rendered/captioned/scored 9:16 clips
-out, validated on real footage. The Instagram feedback loop ships in-app
-(sync, clip↔Reel matching, snapshot history, automatic score calibration).
-Builds are currently unsigned — install from source below.
+Working end to end on real footage: range cuts, auto-found moments, live
+editing with Claude Code, cloud analysis and parallel cloud renders (a
+2-minute clip renders in under a minute on Modal). Runs on Windows and macOS
+from source; the analysis can also run fully locally.
 
-Runs on macOS (Apple silicon) and Windows 10/11 x64. The Windows path is
-validated on every push by the `windows` workflow: env resolve, full test
-suite, NSIS build, silent install, and a launch of the installed app on a
-clean VM.
+## Music
 
-## Music & SFX
-
-Every clip gets its own music/sfx track, backed by a local library at
-`~/.tetclipper/audio/` (files copied in, plus an index of tags/bpm/licence).
-The library starts empty — fill it from your own files, or pull
-Creative-Commons tracks from Freesound/Jamendo straight from the app.
-
-- **Local import** — Library tab → **files**/**folder** opens a native
-  picker. Kind (music vs. sfx) and tags are derived automatically; bpm is
-  detected for music.
-- **Online CC sources** — the Online tab searches Freesound (sound effects)
-  and Jamendo (music), CC0-only by default. Both need a free API key, saved
-  once in the app: [freesound.org/apiv2/apply](https://freesound.org/apiv2/apply/)
-  and [devportal.jamendo.com](https://devportal.jamendo.com/) — the panel
-  shows the signup link inline when a key is missing.
-- **Suggestions** — **suggest audio** scores your library against the
-  clip's music brief (genre/mood/bpm/energy) and the event timeline (cut
-  boundaries, laughs), and proposes one music bed plus a few sfx stings.
-  Suggested items show dashed on the track; accept one with its ✓, or
-  delete it — nothing is ever auto-accepted.
-- **Manual placement** — drag any library item onto the audio track,
-  drag its edges to trim, drag its body to move it. Select an item for
-  gain, fade in/out, loop, and duck controls.
-- **Ducking** — music tagged to duck sidechains under speech automatically
-  at render time (light/medium/heavy, from the clip's brief) so dialogue
-  always stays legible; sfx never ducks.
-- **Licence policy** — CC0 by default; a CC-BY item requires opting in
-  ("allow attribution" in the Online tab) and is never silent about it — a
-  `credits.txt` is written next to every rendered clip that uses one,
-  listing its attribution. NC and ND licences are never fetched, full stop.
+Each clip's spec can carry a music bed (`music` in `spec.json`): volume,
+automatic ducking under speech, fades, offset and loop. The duck/fade curve
+is computed per frame by the same rules in the live preview
+(`studio/composition/src/music.ts`) and in the cloud mix
+(`pipeline/tetclipper_pipeline/spec/music.py`), so what you hear in the
+editor is what renders. Tracks come from your own uploads or the local
+library at `~/.tetclipper/audio/` — fill it from your files
+(`tetclipper audio import`) or with the free CC0 starter pack (Music tab;
+needs a free [Jamendo](https://devportal.jamendo.com/) or
+[Freesound](https://freesound.org/apiv2/apply/) key). NC and ND licences are
+never fetched; CC-BY needs an explicit opt-in.
 
 ## Layout
 
 ```
-pipeline/   Python package — the entire processing pipeline + CLI + web server
+pipeline/   Python package — the processing pipeline, CLI, web server, Modal app
 studio/     Studio: Remotion composition (spec → video) + the browser editor
-app/        Tauri v2 desktop shell (React UI, Python sidecar)
 ```
 
-## Install from source (macOS)
+The old Tauri desktop app was retired in favour of Studio (it lives in git
+history before the `retire desktop app` commit).
 
-You need four tools: git, [Node](https://nodejs.org), [Rust](https://rustup.rs),
-and [uv](https://docs.astral.sh/uv/). Then:
+## Install from source (Windows or macOS)
+
+You need git, [Node 22+](https://nodejs.org), [uv](https://docs.astral.sh/uv/),
+the [Claude Code CLI](https://claude.com/claude-code) (logged in, for chat and
+judging), and optionally a [Modal](https://modal.com) account for the cloud GPU.
 
 ```sh
-git clone <your tetclipper repo URL>
-cd tetclipper/app
-npm install
-npx tauri build --bundles app
-ditto src-tauri/target/release/bundle/macos/tetclipper.app /Applications/tetclipper.app
-open /Applications/tetclipper.app
+git clone <your tetclipper repo URL> && cd tetclipper
+cd studio && npm install && npm run build -w editor && cd ..
+cd pipeline && uv sync --group pipeline --group server --group cloud
+modal deploy modal_app.py          # optional: cloud analysis + rendering
+uv run tetclipper serve            # → http://localhost:8765/studio/
 ```
 
-The app downloads its speech/audio models (~4–5 GB) on first run with a
-progress UI, and fetches a caption-capable static ffmpeg automatically if the
-machine has none. Scoring runs on Claude Code by default; your own Gemini API
-key or a local Ollama model (reduced scoring quality) are one tap away in
-onboarding.
-
-## Install from source (Windows)
-
-You need [Rust](https://rustup.rs), the Visual Studio **Desktop development
-with C++** build tools, [Node](https://nodejs.org), git, and
-[uv](https://docs.astral.sh/uv/) (`winget install --id astral-sh.uv -e`).
-Then, in PowerShell:
-
-```powershell
-git clone <your tetclipper repo URL>
-cd tetclipper\app
-npm.cmd install
-node_modules\.bin\tauri.cmd build --bundles nsis
-# run the installer it produces:
-Start-Process (Get-ChildItem src-tauri\target\release\bundle\nsis -Filter *-setup.exe).FullName
-```
-
-First run behaves the same as on macOS: models download behind a progress
-bar, and a caption-capable static ffmpeg is fetched automatically.
+Without Modal everything runs on your machine: the speech/audio models
+(~4–5 GB) download on first use, and a caption-capable static ffmpeg is
+fetched automatically. A GPU-less laptop is slow (minutes per minute of
+video), which is what the cloud path is for.
 
 ## Development
 
 ```sh
-# pipeline
+# pipeline tests
 cd pipeline && uv sync --group dev --group pipeline && uv run pytest
-uv run tetclipper run "https://www.youtube.com/watch?v=..."
 
-# pick the brain per run: --llm claude (default) | gemini | ollama
-# own Gemini key from a terminal: TETCLIPPER_GEMINI_API_KEY=AIza...
+# Studio from a terminal
+uv run tetclipper cut  "https://youtu.be/..." 12:30 13:15 --captions sermon   # exact range
+uv run tetclipper find "https://youtu.be/..." 30:00 60:00 --top 5             # Claude finds moments
+uv run tetclipper spec show|validate|undo|render <job> [--clip N]
 
-# browser UI + API (instead of the desktop app)
-uv run --group server tetclipper serve        # http://localhost:8765
+# the original full auto-clipper (ffmpeg render, scoring audit)
+uv run tetclipper run "https://www.youtube.com/watch?v=..." --llm claude
 
-# range mode: only 12:30-13:15 of a video, cut on this machine
-uv run tetclipper cut "https://youtu.be/..." 12:30 13:15 --captions hormozi --language en
+# editor dev server with hot reload (proxies the API on :8765)
+cd studio && npm run dev -w editor          # http://localhost:5174/studio/
 
-# hosted GPU (Modal): analyse there, render here
-modal deploy modal_app.py
-uv run tetclipper push "https://youtu.be/..."     # download here, analyse on Modal
-uv run tetclipper pull <job_id> --render          # bring it back, render here
-
-# app
-cd app && npm install && npm run tauri dev
+# composition: Remotion Studio on the local fixture, schema + gallery
+cd studio/composition && npm run studio
+npm run schema && npm run gallery
 ```
 
 ## License

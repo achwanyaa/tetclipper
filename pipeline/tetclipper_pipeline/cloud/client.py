@@ -135,18 +135,32 @@ def _relay(gen, emit: Emit) -> dict:
     return result
 
 
-def analyze(job, start: float, end: float, captions: str | None, emit: Emit) -> dict:
-    """Range job whose ingest ran here → GPU analysis + spec on Modal → pulled back."""
+def analyze(job, start: float | None, end: float | None, captions: str | None, emit: Emit,
+            stages: list[str] | None = None) -> dict:
+    """Job whose ingest ran here → GPU analysis on Modal → results pulled back.
+    Range mode builds the clip spec too; find mode runs just `stages`."""
     job_dir = Path(job.dir)
     push_files(job_dir, ["ingest.json", "media.mp4", "audio16k.wav"], emit)
     row = {"id": job.id, "source_type": job.source_type, "source": job.source,
            "settings_json": job.settings_json, "title": job.title}
     emit("cloud", -1, "Starting the cloud GPU…")
     t0 = time.time()
-    result = _relay(_fn("analyze").remote_gen(row, start, end, captions), emit)
+    result = _relay(_fn("analyze").remote_gen(row, start, end, captions, stages), emit)
     emit("cloud", 1.0, f"Cloud analysis done in {time.time() - t0:.0f} s")
     pull_job(job_dir, emit)
     return result
+
+
+def build_specs(job_dir: Path, clips: list[int], captions: str | None, emit: Emit) -> None:
+    """Smart camera + spec for several scored clips, one container each, in parallel."""
+    job_dir = Path(job_dir)
+    push_files(job_dir, ["score.json", "clip_edits.json"], emit)
+    emit("spec", -1, f"Directing the camera for {len(clips)} clips in parallel…")
+    done = 0
+    for _ in _fn("build_spec").starmap([(job_dir.name, c, captions) for c in clips]):
+        done += 1
+        emit("spec", done / len(clips), f"Clip {done}/{len(clips)} ready")
+    pull_job(job_dir, emit, only="studio")
 
 
 def render(job_dir: Path, clip: int, emit: Emit) -> Path:

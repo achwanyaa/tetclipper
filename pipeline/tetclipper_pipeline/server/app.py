@@ -1,16 +1,16 @@
-"""Web shell: the same commands the Tauri desktop shell exposes, over HTTP.
+"""Web server: the Studio editor's API, plus the pipeline commands it shells out to.
 
-The React UI (app/) talks to this when it runs in a plain browser:
+The Studio editor (studio/editor, served at /studio/) talks to this:
   POST /api/cmd/<name>   one command, JSON args in, JSON out (400 + text on error,
                          mirroring a rejected Tauri invoke)
-  GET  /api/events       Server-Sent Events: every `tetclipper --jsonl` line,
-                         the same payloads the desktop app gets as `pipeline-event`
+  GET  /api/events       Server-Sent Events: every `tetclipper --jsonl` line
+                         plus spec changes and chat streaming
   GET  /files?path=...   a file under TETCLIPPER_HOME (byte ranges for <video>)
   POST /api/upload       raw request body -> TETCLIPPER_HOME/uploads/<name>
-and, when app/dist exists, the built UI itself at /.
+and the built editor at /studio/ (/ redirects there).
 
-Like the Rust shell (app/src-tauri/src/main.rs), it is a thin proxy: anything
-heavier than a file read shells out to the `tetclipper` CLI.
+It is a thin proxy: anything heavier than a file read shells out to the
+`tetclipper` CLI.
 """
 from __future__ import annotations
 
@@ -28,12 +28,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 PIPELINE_DIR = Path(__file__).resolve().parents[2]
 REPO_DIR = PIPELINE_DIR.parent
-DIST_DIR = Path(os.environ.get("TETCLIPPER_DIST") or REPO_DIR / "app" / "dist")
 # Set on a hosted deployment: every /api and /files request must carry it
 # (Authorization: Bearer … or the pc_token cookie the login screen sets).
 WEB_TOKEN = os.environ.get("TETCLIPPER_WEB_TOKEN") or None
@@ -67,8 +66,8 @@ def _write_json(path: Path, value: Any) -> None:
 # ---------- the pipeline CLI ----------
 
 def cli_command(args: list[str]) -> list[str]:
-    """`uv --directory pipeline run tetclipper ...` — the dev invocation the
-    Rust shell uses, so the CLI keeps managing its own dependency groups.
+    """`uv --directory pipeline run tetclipper ...`, so the CLI keeps
+    managing its own dependency groups.
     TETCLIPPER_CLI overrides the whole prefix (a container with the deps
     already installed runs `python -m tetclipper_pipeline.cli`)."""
     override = os.environ.get("TETCLIPPER_CLI")
@@ -123,7 +122,7 @@ _active_lock = threading.Lock()
 
 def stream_pipeline(args: list[str]) -> None:
     """Spawn `tetclipper --jsonl <args>` on a thread and broadcast its lines.
-    Same `exited` rule as the Rust shell: only when no `result` was seen."""
+    An `exited` event is published only when no `result` was seen."""
 
     def work() -> None:
         token = id(threading.current_thread())
@@ -651,8 +650,11 @@ from . import studio as _studio  # noqa: E402 — registers the studio_* command
 
 if _studio.STUDIO_DIST.exists():
     app.mount("/studio", StaticFiles(directory=_studio.STUDIO_DIST, html=True), name="studio")
-if DIST_DIR.exists():
-    app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="ui")
+
+
+@app.get("/")
+async def _root() -> RedirectResponse:
+    return RedirectResponse("/studio/")
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:

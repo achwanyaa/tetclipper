@@ -33,6 +33,7 @@ ALLOWED_TOOLS = [
     "Write(./spec.json)",
     "Bash(uv run tetclipper spec validate:*)",
     "Bash(uv run tetclipper spec show:*)",
+    "Bash(uv run tetclipper audio list:*)",
 ]
 
 GUIDE = """# Studio clip editor
@@ -47,7 +48,7 @@ Job {job_id}, clip {clip}: "{title}".
 - `spec.json` — the clip. Edit it with the Edit tool (small, targeted edits).
 - `transcript.md` — phrase-by-phrase view: `[start–end] speaker #i-j: text`.
   `#i-j` are indices into `spec.json` → `words`. Read this first to find things.
-- `assets/` — images the user uploaded (intro photos, b-roll). Reference them
+- `assets/` — images and audio the user uploaded (intro photos, b-roll, music). Reference them
   as `studio/clip_{clip:02d}/assets/<name>` (paths are relative to the job dir).
 
 ## The spec (all times are SOURCE seconds — positions in the media file)
@@ -55,6 +56,11 @@ Job {job_id}, clip {clip}: "{title}".
   by changing start/end (stay inside the media; the analysis covers it).
 - `intro`: `null` or `{{src, duration: 0.5–5, fit: "cover"|"contain"}}` — a
   full-screen still before the clip.
+- `music`: `null` or `{{src, volume: 0–1, duck: 0–1, offset, fadeIn, fadeOut, loop}}`
+  — a music bed under the whole clip; `duck` multiplies the volume while anyone
+  speaks (0.35 = speech stays clear). Tracks the user added live in `assets/`;
+  the user's music library is listed by `uv run tetclipper audio list --kind music`
+  (copy a track into assets by asking the user to pick it in the Music tab).
 - `cuts`: `[{{start, end}}]` — spans removed from the middle of the clip. Snap
   to word boundaries (word.start / previous word.end) so nothing is clipped.
 - `words`: `[{{text, start, end, emphasis?, hidden?, speaker?}}]` — captions.
@@ -81,8 +87,8 @@ Job {job_id}, clip {clip}: "{title}".
   If it reports problems, it has restored the last good version: fix and retry.
 - Keep edits minimal; don't rewrite the whole file or drop fields you don't touch.
 - Don't invent words that weren't said. Caption fixes = obvious mishearings only.
-- If asked for something the spec can't express (music, voice changes, new
-  footage), say so briefly.
+- If asked for something the spec can't express (voice changes, new footage,
+  sound effects), say so briefly.
 - The user renders with the Render button; you don't render.
 - Replies: short plain text, no headings. Say what you changed, with times as m:ss.
 """

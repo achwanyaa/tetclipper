@@ -67,6 +67,10 @@ input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); bo
 .clip { display: flex; width: 100%; gap: 8px; align-items: center; margin-top: 4px; background: transparent; text-align: left; }
 .clip span { color: var(--muted); font-size: 12px; }
 .clip.active { border-color: var(--accent); background: #2a2210; }
+.mode { display: flex; gap: 4px; }
+.mode button { flex: 1; padding: 5px 6px; font-size: 12px; }
+.mode button.active { border-color: var(--accent); color: var(--accent); }
+.clip .score { color: var(--accent-ink); background: var(--accent); border-radius: 4px; padding: 0 5px; font-weight: 700; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: #5fd38d; margin-left: auto; }
 
 /* ---- centre ---- */
@@ -119,6 +123,10 @@ input[type='range'] { accent-color: var(--accent); padding: 0; }
 .drop { width: 150px; aspect-ratio: 9 / 16; border: 1.5px dashed var(--line); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); cursor: pointer; overflow: hidden; padding: 8px; }
 .drop.over { border-color: var(--accent); }
 .drop img { width: 100%; height: 100%; object-fit: cover; margin: -8px; }
+
+/* music */
+.music-actions { margin: 14px 0; }
+.music-panel .controls .row label { flex: 1; min-width: 160px; }
 
 /* effects / trim */
 .add-row, .trim-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }

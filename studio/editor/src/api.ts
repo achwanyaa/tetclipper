@@ -56,6 +56,7 @@ export function resolveForPlayer(spec: ClipSpecInput, jobDir: string): ClipSpecI
     ...spec,
     source: { ...spec.source, src: mediaUrl(jobDir, spec.source.src) },
     intro: spec.intro ? { ...spec.intro, src: mediaUrl(jobDir, spec.intro.src) } : spec.intro,
+    music: spec.music ? { ...spec.music, src: mediaUrl(jobDir, spec.music.src) } : spec.music,
     effects: spec.effects?.map((e) => (e.type === 'image' ? { ...e, src: mediaUrl(jobDir, e.src) } : e))
   }
 }
@@ -86,7 +87,7 @@ export interface JobSummary {
   id: string
   title: string
   section: [number, number] | null
-  clips: { clip: number; rendered: boolean; style: string | null }[]
+  clips: { clip: number; rendered: boolean; style: string | null; score: number | null; summary: string | null }[]
 }
 
 export type ServerEvent =

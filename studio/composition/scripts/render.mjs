@@ -29,7 +29,7 @@ const flag = (name) => rest.find((a) => a.startsWith(`--${name}=`))?.split('=')[
 const say = (obj) => process.stdout.write(JSON.stringify(obj) + '\n')
 const progress = (fraction, message) => say({ event: 'progress', stage: 'render', fraction, message })
 
-const TYPES = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' }
+const TYPES = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' }
 
 /** Static file server for base_dir with Range support (OffthreadVideo seeks). */
 function serve(root) {
@@ -66,6 +66,7 @@ function resolveAssets(spec, base) {
   const out = structuredClone(spec)
   out.source.src = url(out.source.src)
   if (out.intro) out.intro.src = url(out.intro.src)
+  if (out.music) out.music.src = url(out.music.src)
   for (const e of out.effects ?? []) if (e.type === 'image') e.src = url(e.src)
   return out
 }

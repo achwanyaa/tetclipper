@@ -9,9 +9,9 @@ Studio (driven from the PC by tetclipper_pipeline/cloud/client.py):
   render   16 CPUs, node + Chromium: Remotion-renders a clip spec to mp4
 
 Everything mutable (models, jobs, clips, secrets.json, llm-cache) lives on
-the `tetclipper-home` Volume, mounted as TETCLIPPER_HOME. The browser UI is
-the built app/dist, served by the same FastAPI app as the API, so one URL
-and one cookie cover both.
+the `tetclipper-home` Volume, mounted as TETCLIPPER_HOME. The web endpoint
+serves the built Studio editor (studio/editor/dist) next to the API. Studio
+chat needs the Claude Code CLI, so it only works in a local `tetclipper serve`.
 
 The container stays up while a browser tab is open (its SSE stream is an
 open request) plus SCALEDOWN seconds, and jobs checkpoint after every stage,
@@ -50,14 +50,14 @@ image = (
         "TETCLIPPER_SKIP_STAGES": "render",
         # The web shell spawns this instead of `uv run tetclipper` (no uv in the image).
         "TETCLIPPER_CLI": "python -m tetclipper_pipeline.cli",
-        "TETCLIPPER_DIST": "/root/app/dist",
+        "TETCLIPPER_STUDIO_DIST": "/root/studio-dist",
         # uv_sync also installs a frozen copy of the package into site-packages;
         # the live mount at /root must win, for the server and its CLI subprocesses.
         "PYTHONPATH": "/root",
         "PYTHONUNBUFFERED": "1",
     })
     .add_local_dir(str(HERE / "tetclipper_pipeline"), remote_path="/root/tetclipper_pipeline")
-    .add_local_dir(str(REPO / "app" / "dist"), remote_path="/root/app/dist")
+    .add_local_dir(str(REPO / "studio" / "editor" / "dist"), remote_path="/root/studio-dist")
 )
 
 
@@ -80,6 +80,7 @@ render_image = (
         "cd /root/studio/composition && npx remotion browser ensure",
         "cd /root/studio/composition && node scripts/bundle.mjs /root/bundle",
     )
+    .pip_install("numpy")  # the music mix (cloud/remote.py)
     .env({"TETCLIPPER_BUNDLE": "/root/bundle", "PYTHONPATH": "/root"})
     .add_local_dir(str(HERE / "tetclipper_pipeline"), remote_path="/root/tetclipper_pipeline")
 )
@@ -134,16 +135,31 @@ def _in_root() -> None:
         sys.path.insert(0, "/root")
 
 
-@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=40 * 60, cpu=8.0, memory=16384)
-def analyze(row: dict, start: float, end: float, captions: str | None = None):
-    """Studio range job → clip spec (generator of progress events)."""
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, cpu=8.0, memory=16384)
+def analyze(row: dict, start: float | None, end: float | None, captions: str | None = None,
+            stages: list[str] | None = None):
+    """Studio range job → clip spec, or analysis stages for `find` (generator of progress events)."""
     _in_root()
     _mark_deps_synced()
     volume.reload()
     from tetclipper_pipeline.cloud import remote
 
     try:
-        yield from remote.analyze(row, start, end, captions)
+        yield from remote.analyze(row, start, end, captions, stages)
+    finally:
+        volume.commit()
+
+
+@app.function(image=image, volumes={HOME: volume}, timeout=20 * 60, cpu=8.0, memory=8192)
+def build_spec(job_id: str, clip: int, captions: str | None = None) -> dict:
+    """Smart camera + spec for one found moment (mapped across clips by `find`)."""
+    _in_root()
+    _mark_deps_synced()
+    volume.reload()
+    from tetclipper_pipeline.cloud import remote
+
+    try:
+        return remote.build_spec(job_id, clip, captions)
     finally:
         volume.commit()
 

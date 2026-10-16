@@ -15,6 +15,7 @@ import { invoke, resolveForPlayer, type ClipData } from '../api'
 import type { EditorState, Run } from '../App'
 import { EffectsPanel } from './EffectsPanel'
 import { IntroPanel } from './IntroPanel'
+import { MusicPanel } from './MusicPanel'
 import { StylePanel } from './StylePanel'
 import { Transcript } from './Transcript'
 import { TrimPanel } from './TrimPanel'
@@ -29,7 +30,7 @@ export interface PanelProps {
   setError: (e: string | null) => void
 }
 
-const TABS = ['Captions', 'Style', 'Intro', 'Effects', 'Trim'] as const
+const TABS = ['Captions', 'Style', 'Intro', 'Music', 'Effects', 'Trim'] as const
 type Tab = (typeof TABS)[number]
 
 interface Props {
@@ -161,6 +162,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
         {tab === 'Captions' && <Transcript {...panel} />}
         {tab === 'Style' && <StylePanel {...panel} />}
         {tab === 'Intro' && <IntroPanel {...panel} />}
+        {tab === 'Music' && <MusicPanel {...panel} />}
         {tab === 'Effects' && <EffectsPanel {...panel} />}
         {tab === 'Trim' && <TrimPanel {...panel} />}
       </section>

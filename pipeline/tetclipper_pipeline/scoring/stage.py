@@ -63,6 +63,14 @@ def _window_pct(values: np.ndarray, grid_sec: float, start: float, end: float) -
     return float(np.mean(values <= window_mean))
 
 
+def _music_briefs_on() -> bool:
+    """Studio's `find` doesn't use music briefs: it sets TETCLIPPER_MUSIC_BRIEFS=0
+    and saves the second Claude round."""
+    import os
+
+    return os.environ.get("TETCLIPPER_MUSIC_BRIEFS", "1") != "0"
+
+
 class ScoreStage(Stage):
     name = "score"
     schema_version = 1
@@ -221,6 +229,9 @@ class ScoreStage(Stage):
             entry["confidence"] = "standard" if client.backend in ("gemini", "claude") else "local-estimate"
 
             prior_mood = music_brief.mood_prior(window_events, entry["arousal_pct"])
+            if not _music_briefs_on():
+                entry["music"] = None
+                continue
             try:
                 entry["music"] = client.generate_json(
                     music_brief.music_prompt(
@@ -233,7 +244,7 @@ class ScoreStage(Stage):
                 entry["music"] = None
 
         # Second handoff round: the finalists' music briefs.
-        if hasattr(client, "checkpoint"):
+        if hasattr(client, "checkpoint") and _music_briefs_on():
             client.checkpoint(ctx.job_dir, "music-brief")
 
         finalists.sort(key=lambda e: e["score"], reverse=True)

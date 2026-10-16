@@ -1,0 +1,41 @@
+# Pipeline test suite + Studio typecheck/build on every push and PR.
+name: ci
+
+on:
+  push:
+    branches: [main, web-fork]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TETCLIPPER_HOME: ${{ github.workspace }}/.tetclipper-home
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pipeline/uv.lock
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - working-directory: pipeline
+        run: uv sync --frozen --group dev --group pipeline --group server
+      - working-directory: pipeline
+        run: uv run --no-sync pytest -q
+
+  studio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: studio/package-lock.json
+      - working-directory: studio
+        run: npm ci
+      - working-directory: studio
+        run: npm run typecheck -w composition && npm run build -w editor

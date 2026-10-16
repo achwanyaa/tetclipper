@@ -3,10 +3,10 @@ import type { ClipSpecInput } from '@tetclipper/composition'
 import { invoke, onEvent, type ClipData, type JobSummary } from './api'
 import { Canvas } from './components/Canvas'
 import { Chat } from './components/Chat'
-import { Sidebar } from './components/Sidebar'
+import { Sidebar, type FindArgs } from './components/Sidebar'
 
 export interface Run {
-  kind: 'cut' | 'render'
+  kind: 'cut' | 'find' | 'render'
   jobId?: string
   clip?: number
   fraction: number
@@ -65,7 +65,7 @@ export function App() {
         if (ev.event === 'spec' && cur && ev.job_id === cur.jobId && ev.clip === cur.clip) {
           if (ev.source !== 'editor') setSpec(ev.spec)
           setData((d) => (d ? { ...d, history: [...d.history.filter((h) => !ev.history.some((n) => n.version === h.version)), ...ev.history] } : d))
-        } else if (ev.event === 'job' && runRef.current?.kind === 'cut') {
+        } else if (ev.event === 'job' && (runRef.current?.kind === 'cut' || runRef.current?.kind === 'find')) {
           setRun((r) => (r ? { ...r, jobId: ev.job_id } : r))
           refreshJobs()
         } else if (ev.event === 'progress' && runRef.current) {
@@ -80,7 +80,7 @@ export function App() {
             return
           }
           setRun(null)
-          if (r.kind === 'cut' && ev.event === 'result' && ev.job_id) setOpen({ jobId: ev.job_id, clip: 0 })
+          if ((r.kind === 'cut' || r.kind === 'find') && ev.event === 'result' && ev.job_id) setOpen({ jobId: ev.job_id, clip: 0 })
           if (r.kind === 'render' && cur) loadClip(cur.jobId, cur.clip)
         }
       }),
@@ -141,6 +141,15 @@ export function App() {
     }
   }, [])
 
+  const startFind = useCallback(async (args: FindArgs) => {
+    setRun({ kind: 'find', fraction: 0, message: 'Starting…' })
+    try {
+      await invoke('studio_find', { ...args })
+    } catch (e) {
+      setRun((r) => (r ? { ...r, error: String((e as Error).message ?? e) } : r))
+    }
+  }, [])
+
   return (
     <div className="studio">
       <Sidebar
@@ -149,6 +158,7 @@ export function App() {
         run={run}
         onOpen={(jobId, clip) => setOpen({ jobId, clip })}
         onCut={startCut}
+        onFind={startFind}
         onDismissRun={() => setRun(null)}
       />
       <main className="center">
