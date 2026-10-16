@@ -261,8 +261,13 @@ def download(url: str, out_path: Path, progress: ProgressFn,
     if ffmpeg:
         args += ["--ffmpeg-location", ffmpeg]
     if section:
-        # Only this slice; cuts re-encoded on keyframes so it starts on time.
-        args += ["--download-sections", f"*{section[0]:.2f}-{section[1]:.2f}", "--force-keyframes-at-cuts"]
+        # Only this slice, stream-copied. ffmpeg starts the copy at the previous
+        # keyframe and writes an MP4 edit list that skips to the exact start,
+        # so decoders (ffmpeg, Remotion, the browser) begin on time — checked
+        # against a re-encoded cut: same audio sample, same frames. Forcing
+        # keyframes instead re-encoded the whole slice (~14 min for 6 min of
+        # 1080p on a 4-core laptop vs ~1 min to copy).
+        args += ["--download-sections", f"*{section[0]:.2f}-{section[1]:.2f}"]
     args += ["-o", str(out_path), url]
 
     def _on_line(line: str) -> None:
