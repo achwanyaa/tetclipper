@@ -91,12 +91,26 @@ Job {job_id}, clip {clip}: "{title}".
 - `crop.keyframes`: `[{{t, x, y, zoom, cut?}}]` — the smart-camera path (x/y =
   crop centre as a fraction of the source frame, zoom ≥ 1). Usually leave it;
   to re-frame a moment, adjust the keyframes around that time.
-- `effects`: list of
-  - `{{type:"punch-in", at, duration, amount: 1–2}}` — zoom in and back out
-  - `{{type:"shake", at, duration, intensity}}`, `{{type:"flash", at, duration}}`
-  - `{{type:"emoji", at, duration, emoji, x?, y?, size?}}`
-  - `{{type:"hook", at, duration, text, background?, color?}}` — title card
-  - `{{type:"image", at, duration, src, layout: "full"|"top"}}`
+- `effects`: list of timed effects; every one has `at` (source seconds) and `duration`:
+  - camera: `punch-in {{amount 1–2}}`, `digital-zoom {{amount}}` (hard zoom + glitch),
+    `vertigo {{amount}}` (dolly zoom), `pull-back {{from 1–4, to 0.5–1}}` (to<1 ends on a
+    framed card), `zoom-through` (transition — set `at` to the start of the part after
+    a cut), `shake {{intensity}}`, `flash`
+  - graphics: `checklist {{title?, items[], ticks[]? (source s per item), y?, accent?}}`,
+    `headline-wall {{headlines[], look: news|scripture}}`,
+    `chart {{kind: bar|line, title?, labels[], values[], unit?, color?, y?}}`,
+    `glass-text {{text, subtitle?, y?}}`, `hook {{text, background?, color?}}`,
+    `emoji {{emoji, x?, y?, size?}}`, `image {{src, layout: full|top}}`
+  - styles: `phone {{tilt?, background?}}`, `ui-cards {{cards: [{{kind: notification|like|comment|verse, title, text?}}]}}`,
+    `paper-text {{text, color?, y?}}`, `doodle {{shape: arrow|circle|underline|star|heart|sparkle, x, y, size?, rotation?, color?}}`,
+    `orbit {{items[] (words/emoji), x?, y?, radius?}}`
+  - behind the speaker (need the speaker cut out — `matte` in the spec; if `matte` is
+    null tell the user to press "Cut out speaker" in the Effects tab):
+    `wall-text {{text, color?, y?}}`, `frame-break {{color?}}`,
+    `background {{mode: blur|color|image, color?, src?}}` (green screen),
+    `cover {{title, lines[], issue?, color?}}` (magazine cover)
+  - x/y are fractions of the frame (0–1). Use the speaker's words for text; keep
+    graphics short (2–6 s) and don't stack many at once.
 - `progressBar`: `{{enabled, color}}`
 
 ## Rules

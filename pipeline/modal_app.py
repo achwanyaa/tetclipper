@@ -153,6 +153,20 @@ def analyze(row: dict, start: float | None, end: float | None, captions: str | N
         volume.commit()
 
 
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=40 * 60, cpu=8.0, memory=16384)
+def matte(job_id: str, clip: int, spec: dict):
+    """Cut the speaker out of one clip (generator of progress events)."""
+    _in_root()
+    _mark_deps_synced()
+    volume.reload()
+    from tetclipper_pipeline.cloud import remote
+
+    try:
+        yield from remote.matte(job_id, clip, spec)
+    finally:
+        volume.commit()
+
+
 @app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=10 * 60, cpu=4.0, memory=8192)
 def second_listen(job_id: str, request: dict) -> list:
     """Swahili second listen over doubtful caption spans ({words, spans, hotwords?, model?})."""

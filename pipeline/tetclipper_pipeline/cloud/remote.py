@@ -80,6 +80,23 @@ def _use_glossary(data: dict | None) -> None:
         glossary.save(data)
 
 
+def matte(job_id: str, clip: int, spec: dict) -> Iterator[dict]:
+    """Cut the speaker out of a clip on the GPU (spec sent from the PC)."""
+
+    def work(emit) -> dict:
+        from ..config import jobs_dir
+        from ..spec import matte as matte_mod
+        from ..spec import store
+
+        job_dir = jobs_dir() / job_id
+        d = store.clip_dir(job_dir, clip)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
+        return matte_mod.make(job_dir, clip, lambda f, m: emit("matte", f, m))
+
+    return _threaded(work)
+
+
 def second_listen(job_id: str, request: dict) -> list[dict]:
     """The Swahili second listen on the GPU, for spans the PC already found.
     request: {words, spans, hotwords?, model?}"""

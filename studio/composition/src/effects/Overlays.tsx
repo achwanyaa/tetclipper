@@ -1,9 +1,15 @@
-// Effects drawn on top of the video: flash, emoji, hook card, image, progress bar.
-// (punch-in and shake move the video itself — see VideoLayer.)
+// Effects drawn over the video. Camera moves and framing (punch-in, shake,
+// digital zoom, vertigo, pull-back, zoom-through, phone, frame-break,
+// background) change the video itself — see VideoLayer. Two layers here:
+//   behind — between the background and the cut-out speaker (spec.matte)
+//   front  — over everything except captions
 import { AbsoluteFill, Img, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion'
 import { PRESETS } from '../captions/presets'
 import type { ClipSpec, Effect } from '../spec'
 import { type Timeline, useSourceTime } from '../timeline'
+import { Cover, WallText } from './behind'
+import { Chart, Checklist, GlassText, HeadlineWall } from './graphics'
+import { Doodle, Orbit, PaperText, UiCards } from './styles'
 
 function Overlay({ effect, local, fps }: { effect: Effect; local: number; fps: number }) {
   const p = local / effect.duration
@@ -69,12 +75,41 @@ function Overlay({ effect, local, fps }: { effect: Effect; local: number; fps: n
           <Img src={effect.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </AbsoluteFill>
       )
+    case 'checklist':
+      return <Checklist effect={effect} local={local} fps={fps} />
+    case 'headline-wall':
+      return <HeadlineWall effect={effect} local={local} fps={fps} />
+    case 'chart':
+      return <Chart effect={effect} local={local} fps={fps} />
+    case 'glass-text':
+      return <GlassText effect={effect} local={local} fps={fps} />
+    case 'ui-cards':
+      return <UiCards effect={effect} local={local} fps={fps} />
+    case 'paper-text':
+      return <PaperText effect={effect} local={local} fps={fps} />
+    case 'doodle':
+      return <Doodle effect={effect} local={local} fps={fps} />
     default:
       return null
   }
 }
 
-export function Overlays({ spec, tl }: { spec: ClipSpec; tl: Timeline }) {
+/** Pieces of an effect that belong in `layer` (null = none). */
+function Piece({ effect, local, fps, layer, matte }: { effect: Effect; local: number; fps: number; layer: 'behind' | 'front'; matte: boolean }) {
+  switch (effect.type) {
+    case 'wall-text':
+      return layer === 'behind' ? <WallText effect={effect} local={local} fps={fps} /> : null
+    case 'cover':
+      return <Cover effect={effect} local={local} fps={fps} part={layer === 'behind' ? 'masthead' : 'lines'} />
+    case 'orbit':
+      if (!matte) return layer === 'front' ? <Orbit effect={effect} local={local} fps={fps} half="all" /> : null
+      return <Orbit effect={effect} local={local} fps={fps} half={layer === 'behind' ? 'back' : 'front'} />
+    default:
+      return layer === 'front' ? <Overlay effect={effect} local={local} fps={fps} /> : null
+  }
+}
+
+export function Overlays({ spec, tl, layer = 'front' }: { spec: ClipSpec; tl: Timeline; layer?: 'behind' | 'front' }) {
   const frame = useCurrentFrame()
   const { fps, durationInFrames } = useVideoConfig()
   const t = useSourceTime(tl)
@@ -85,9 +120,9 @@ export function Overlays({ spec, tl }: { spec: ClipSpec; tl: Timeline }) {
       {spec.effects
         .filter((e) => t >= e.at && t <= e.at + e.duration)
         .map((e, i) => (
-          <Overlay key={i} effect={e} local={t - e.at} fps={fps} />
+          <Piece key={i} effect={e} local={t - e.at} fps={fps} layer={layer} matte={!!spec.matte} />
         ))}
-      {spec.progressBar.enabled && (
+      {layer === 'front' && spec.progressBar.enabled && (
         <div
           style={{
             position: 'absolute',

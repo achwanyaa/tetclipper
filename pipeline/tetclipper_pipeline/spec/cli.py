@@ -51,6 +51,10 @@ def add_parser(sub) -> None:
     p_doubts.add_argument("job_id")
     p_doubts.add_argument("--clip", type=int, default=0)
 
+    p_matte = spec_sub.add_parser("matte", help="cut the speaker out (enables behind-the-speaker effects)")
+    p_matte.add_argument("job_id")
+    p_matte.add_argument("--clip", type=int, default=0)
+
     p_render = spec_sub.add_parser("render", help="render a clip's spec to studio/clip_NN/render.mp4 (Remotion)")
     p_render.add_argument("job_id")
     p_render.add_argument("--clip", type=int, default=0)
@@ -168,6 +172,23 @@ def run(args: argparse.Namespace) -> int:
             _emit_result(args.jsonl, {"ok": False, "error": str(err)})
             return 1
         _emit_result(args.jsonl, {"ok": True, "doubts": spec["doubts"]})
+        return 0
+
+    if args.spec_cmd == "matte":
+        from ..cloud import client as cloud_client
+        from . import matte as matte_mod
+
+        emit = _progress_printer(args.jsonl)
+        try:
+            if cloud_client.available():
+                result = cloud_client.matte(job_dir, args.clip, lambda st, f, m: emit("matte", f, m))
+            else:
+                result = matte_mod.make(job_dir, args.clip, lambda f, m: emit("matte", f, m))
+            matte_mod.attach(job_dir, args.clip, result)
+        except Exception as err:  # noqa: BLE001
+            _emit_result(args.jsonl, {"ok": False, "job_id": job.id, "clip": args.clip, "error": str(err)})
+            return 1
+        _emit_result(args.jsonl, {"ok": True, "job_id": job.id, "clip": args.clip, "matte": result})
         return 0
 
     if args.spec_cmd == "render":

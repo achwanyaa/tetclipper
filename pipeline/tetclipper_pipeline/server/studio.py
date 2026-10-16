@@ -279,6 +279,14 @@ def studio_dead_air(jobId: str, clip: int, mode: str = "natural", fillers: bool 
 
 
 @command
+def studio_matte(jobId: str, clip: int) -> None:
+    """Cut the speaker out of a clip (behind-the-speaker effects)."""
+    job_dir = _job_dir(jobId)
+    watcher.watch(job_dir, clip)
+    stream_pipeline(["spec", "matte", job_dir.name, "--clip", str(clip)])
+
+
+@command
 def studio_doubts(jobId: str, clip: int) -> None:
     """Re-check a clip's captions (doubtful spans + a Swahili second listen)."""
     job_dir = _job_dir(jobId)

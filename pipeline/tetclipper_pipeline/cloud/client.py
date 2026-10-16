@@ -180,6 +180,29 @@ def second_opinion(job_dir: Path, words: list[dict], spans: list[dict], hotwords
     return _fn("second_listen").remote(job_dir.name, {"words": words, "spans": spans, "hotwords": hotwords})
 
 
+def matte(job_dir: Path, clip: int, emit: Emit) -> dict:
+    """Cut the speaker out on a Modal GPU; download fg.webm next to the spec."""
+    from ..spec import store
+
+    job_dir = Path(job_dir)
+    spec = store.load(job_dir, clip) or {}
+    src = (spec.get("source") or {}).get("src", "media.mp4")
+    try:
+        have = {e.path.rsplit("/", 1)[-1] for e in _volume().listdir(f"/jobs/{job_dir.name}")}
+    except Exception:  # noqa: BLE001
+        have = set()
+    if PurePosixPath(src).name not in have:
+        push_files(job_dir, [src], emit)
+    emit("matte", -1, "Starting the cloud GPU…")
+    result = _relay(_fn("matte").remote_gen(job_dir.name, clip, spec), emit)
+    out = job_dir / result["src"]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out.with_suffix(".part.webm"), "wb") as fh:
+        _volume().read_file_into_fileobj(_remote_rel(job_dir.name, result["src"]), fh)
+    out.with_suffix(".part.webm").replace(out)
+    return result
+
+
 def render(job_dir: Path, clip: int, emit: Emit) -> Path:
     """Upload the clip's spec + assets (and media if the volume lacks it),
     render on Modal, download render.mp4."""
@@ -199,6 +222,8 @@ def render(job_dir: Path, clip: int, emit: Emit) -> Path:
         have = set()
     if PurePosixPath(src).name not in have:
         rels.append(src)
+    if spec.get("matte"):
+        rels.append(spec["matte"]["src"])  # usually already there (made on the volume); cheap to re-send when edited
     push_files(job_dir, rels, emit)
     emit("render", -1, "Starting the cloud renderer…")
     _relay(_fn("render").remote_gen(f"{REMOTE_HOME}/jobs/{job_dir.name}", clip), emit)

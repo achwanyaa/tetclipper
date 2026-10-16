@@ -6,7 +6,7 @@ import { Intro } from './Intro'
 import { musicGains } from './music'
 import { FPS, clipSpecSchema, type ClipSpec, type ClipSpecInput } from './spec'
 import { buildTimeline } from './timeline'
-import { VideoLayer } from './VideoLayer'
+import { SpeakerLayer, VideoLayer } from './VideoLayer'
 
 export function VerticalClip(props: ClipSpecInput) {
   // Fill defaults so partial specs (from the UI or hand-written JSON) render.
@@ -16,7 +16,9 @@ export function VerticalClip(props: ClipSpecInput) {
   return (
     <AbsoluteFill style={{ backgroundColor: '#000' }}>
       <VideoLayer spec={spec} tl={tl} />
-      <Overlays spec={spec} tl={tl} />
+      <Overlays spec={spec} tl={tl} layer="behind" />
+      <SpeakerLayer spec={spec} tl={tl} />
+      <Overlays spec={spec} tl={tl} layer="front" />
       <Captions spec={spec} tl={tl} />
       <Intro spec={spec} tl={tl} />
       {spec.music && (

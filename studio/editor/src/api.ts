@@ -57,7 +57,8 @@ export function resolveForPlayer(spec: ClipSpecInput, jobDir: string): ClipSpecI
     source: { ...spec.source, src: mediaUrl(jobDir, spec.source.src) },
     intro: spec.intro ? { ...spec.intro, src: mediaUrl(jobDir, spec.intro.src) } : spec.intro,
     music: spec.music ? { ...spec.music, src: mediaUrl(jobDir, spec.music.src) } : spec.music,
-    effects: spec.effects?.map((e) => (e.type === 'image' ? { ...e, src: mediaUrl(jobDir, e.src) } : e))
+    matte: spec.matte ? { ...spec.matte, src: mediaUrl(jobDir, spec.matte.src) } : spec.matte,
+    effects: spec.effects?.map((e) => ((e.type === 'image' || e.type === 'background') && e.src ? { ...e, src: mediaUrl(jobDir, e.src) } : e))
   }
 }
 
