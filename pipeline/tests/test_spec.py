@@ -220,6 +220,25 @@ def test_word_list_learns_from_an_edit_and_applies_to_new_clips(home):
     assert [w["text"] for w in new_clip if not w.get("hidden")] == ["so", "ebu", "tusome", "Amen"]
 
 
+def test_word_list_ignores_one_word_swaps_deletions_and_rewrites(home):
+    from tetclipper_pipeline.spec import glossary
+
+    old = [_w("go", 0, 0.2), _w("to", 0.3, 0.4), _w("a", 0.5, 0.6), _w("place", 0.7, 1.0), _w("now", 1.2, 1.4)]
+    swap = [dict(w) for w in old]
+    swap[2]["text"] = "kwa"  # one word: context-specific
+    assert glossary.learn(old, swap) == 0
+    deleted = [dict(w) for w in old]
+    deleted[1]["hidden"] = True  # deletion: context-specific
+    assert glossary.learn(old, deleted) == 0
+    long_old = [_w(f"w{i}", i, i + 0.5) for i in range(8)]
+    rewrite = [dict(w, text=f"x{i}") for i, w in enumerate(long_old)]  # sentence rewrite, not a mishearing
+    assert glossary.learn(long_old, rewrite) == 0
+    assert glossary.load()["fixes"] == []
+    # junk already on disk is dropped on the next save and never applied
+    glossary.save({"phrases": [], "fixes": [{"heard": "a", "said": "kwa"}, {"heard": "able to show me", "said": "ebu tusome"}]})
+    assert [f["heard"] for f in glossary.load()["fixes"]] == ["able to show me"]
+
+
 def test_store_save_teaches_the_word_list_and_resolves_doubts(home, tmp_path):
     from tetclipper_pipeline.spec import glossary
 

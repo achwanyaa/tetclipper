@@ -32,6 +32,11 @@ INITIAL_PROMPT = (
 )
 MAX_HOTWORDS = 40
 MAX_RUN = 8  # longer changed runs are rewrites, not misheard words
+# Only phrase-level mishearings are reusable rules ("able to show me" → "ebu
+# tusome"). A one-word swap ("a" → "kwa") or a deletion is right in that spot
+# only; learned globally it would rewrite every "a" in every future clip.
+MIN_HEARD_WORDS = 2
+MAX_HEARD_WORDS = 6
 
 _PUNCT = re.compile(r"[^\w']+", re.UNICODE)
 
@@ -53,7 +58,7 @@ def load() -> dict:
 def save(data: dict) -> dict:
     clean = {
         "phrases": sorted({p.strip() for p in data.get("phrases", []) if p and p.strip()}, key=str.lower),
-        "fixes": [f for f in data.get("fixes", []) if f.get("heard", "").strip() and f.get("said") is not None],
+        "fixes": [f for f in data.get("fixes", []) if reusable(f.get("heard", ""), f.get("said") or "")],
     }
     path().parent.mkdir(parents=True, exist_ok=True)
     path().write_text(json.dumps(clean, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -142,9 +147,15 @@ def diff_fixes(old: list[dict], new: list[dict]) -> list[tuple[str, str]]:
             continue
         heard = " ".join(w["text"] for w in old[i : j + 1] if not w.get("hidden")).strip()
         said = " ".join(w["text"] for w in new[i : j + 1] if not w.get("hidden")).strip()
-        if heard and norm(heard) != norm(said):
+        if reusable(heard, said):
             pairs.append((heard, said))
     return pairs
+
+
+def reusable(heard: str, said: str) -> bool:
+    """Worth applying to every future clip? See MIN_HEARD_WORDS."""
+    n = len(norm(heard).split())
+    return bool(said.strip()) and norm(heard) != norm(said) and MIN_HEARD_WORDS <= n <= MAX_HEARD_WORDS
 
 
 def learn(old_words: list[dict], new_words: list[dict]) -> int:
@@ -168,7 +179,7 @@ def learn(old_words: list[dict], new_words: list[dict]) -> int:
 def apply_fixes(words: list[dict], data: dict | None = None) -> tuple[list[dict], int]:
     """Replace every known misheard sequence in `words` (visible words only)."""
     data = data or load()
-    fixes = [(norm(f["heard"]).split(), f["said"]) for f in data["fixes"]]
+    fixes = [(norm(f["heard"]).split(), f["said"]) for f in data["fixes"] if reusable(f["heard"], f["said"])]
     fixes = sorted([f for f in fixes if f[0]], key=lambda f: -len(f[0]))  # longest first
     words = [dict(w) for w in words]
     applied = 0
