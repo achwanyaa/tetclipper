@@ -174,3 +174,100 @@ def test_music_gains_match_the_composition():
     assert picks == [0, 0.2, 0.3, 0.12, 0.12, 0.12, 0.3, 0.3, 0]
     assert round(sum(g), 6) == 41.04
     assert validate({**_spec(), "music": spec["music"]}) == []
+
+
+# ---------- mixed-language captions: word list + doubts ----------
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    monkeypatch.setenv("TETCLIPPER_HOME", str(tmp_path / "home"))
+    return tmp_path / "home"
+
+
+def _w(text, start, end, **kw):
+    return {"text": text, "start": start, "end": end, **kw}
+
+
+MISHEARD = [
+    _w("reading", 12.65, 12.89), _w("this", 12.93, 13.11), _w("verse,", 13.19, 13.65),
+    _w("able", 13.71, 13.89), _w("to", 13.91, 13.99), _w("show", 14.01, 14.15), _w("me", 14.17, 15.55),
+    _w("Revelation", 16.35, 16.83),
+]
+
+
+def test_retext_keeps_word_count_and_spreads_timing():
+    from tetclipper_pipeline.spec.glossary import retext
+
+    out = retext(MISHEARD[3:7], "ebu tusome")
+    assert [w["text"] for w in out] == ["ebu", "tusome", "show", "me"]
+    assert [bool(w.get("hidden")) for w in out] == [False, False, True, True]
+    assert out[0]["start"] == 13.71 and out[1]["end"] == 15.55
+    assert out[0]["end"] == out[1]["start"]
+
+
+def test_word_list_learns_from_an_edit_and_applies_to_new_clips(home):
+    from tetclipper_pipeline.spec import glossary
+
+    fixed = MISHEARD[:3] + glossary.retext(MISHEARD[3:7], "ebu tusome") + MISHEARD[7:]
+    assert glossary.learn(MISHEARD, fixed) == 1
+    data = glossary.load()
+    assert data["fixes"] == [{"heard": "able to show me", "said": "ebu tusome", "count": 1}]
+    assert "ebu tusome" in glossary.hotwords(data)
+
+    new_clip, n = glossary.apply_fixes([_w("so", 1.0, 1.2), _w("Able", 1.3, 1.5), _w("to", 1.5, 1.6),
+                                        _w("show", 1.6, 1.8), _w("me.", 1.8, 2.4), _w("Amen", 2.6, 3.0)])
+    assert n == 1
+    assert [w["text"] for w in new_clip if not w.get("hidden")] == ["so", "ebu", "tusome", "Amen"]
+
+
+def test_store_save_teaches_the_word_list_and_resolves_doubts(home, tmp_path):
+    from tetclipper_pipeline.spec import glossary
+
+    job = tmp_path / "job"
+    spec = _spec(source={"src": "m.mp4", "start": 12, "end": 17, "width": 1920, "height": 1080},
+                 words=MISHEARD, doubts=[{"from": 3, "to": 6, "reason": "too long", "alt": "ebu tusome"}])
+    store.save(job, 0, spec, reason="built from analysis")
+    edited = {**spec, "words": MISHEARD[:3] + glossary.retext(MISHEARD[3:7], "ebu tusome") + MISHEARD[7:]}
+    saved = store.save(job, 0, edited, reason="use Swahili reading")
+    assert saved["doubts"] == []  # the span was fixed
+    assert glossary.load()["fixes"][0]["said"] == "ebu tusome"
+
+
+def test_doubts_flag_the_swallowing_word_and_its_run():
+    from tetclipper_pipeline.spec.doubts import detect
+
+    spans = detect(MISHEARD)
+    assert spans == [{"from": 3, "to": 6, "reason": "too long for the word (something may be missing)"}]
+    unclear = detect(MISHEARD, scores={0: 0.1})  # unclear audio on a real word, apart from the run
+    assert unclear[0] == {"from": 0, "to": 0, "reason": "unclear audio"} and unclear[1]["from"] == 3
+    assert detect(MISHEARD, scores={7: 0.1})[-1] == {"from": 3, "to": 7, "reason": spans[0]["reason"]}  # adjacent: merged
+    assert detect([_w("Amen", 1.0, 1.5), _w("I", 1.6, 1.7)], scores={1: 0.0}) == []  # short words: noise
+
+
+def test_transcript_lists_doubts_for_claude(tmp_path):
+    spec = _spec(source={"src": "m.mp4", "start": 12, "end": 17, "width": 1920, "height": 1080},
+                 words=MISHEARD, doubts=[{"from": 3, "to": 6, "reason": "too long", "alt": "ebu tusome"}])
+    text = transcript.render(tmp_path, spec)
+    assert '?? [13.71] #3-6 "able to show me" (too long) · Swahili listen heard: "ebu tusome"' in text
+
+
+# ---------- dead air ----------
+
+def test_dead_air_natural_tight_reactions_and_fillers(tmp_path):
+    from tetclipper_pipeline.spec import silence
+
+    words = [_w("One", 0.0, 0.3), _w("two.", 0.4, 0.8), _w("Three", 1.6, 2.0),  # 0.8 s post-sentence pause
+             _w("four", 4.0, 4.3),                                              # 2.0 s mid-sentence gap
+             _w("um", 4.4, 4.7), _w("five", 4.8, 5.1), _w("six", 8.0, 8.3)]     # 2.9 s gap near a laugh
+    (tmp_path / "events.json").write_text(json.dumps({"data": {"timeline": [{"type": "laugh", "start": 6.0, "end": 7.0}]}}))
+    spec = _spec(source={"src": "m.mp4", "start": 0, "end": 8.3, "width": 1920, "height": 1080}, words=words)
+
+    natural = silence.find(spec, tmp_path, "natural")
+    assert natural["cuts"] == [{"start": 2.15, "end": 3.85}]  # breath kept both sides
+    assert {k["reason"] for k in natural["kept"]} == {"natural sentence pause", "comedic timing (near a reaction)"}
+    tight = silence.find(spec, tmp_path, "tight")
+    assert {"start": 0.88, "end": 1.52} in tight["cuts"] and len(tight["cuts"]) == 2
+    with_fillers = silence.find(spec, tmp_path, "natural", fillers=True)
+    assert with_fillers["filler_words"] == [4]
+    applied = silence.apply(spec, with_fillers)
+    assert applied["words"][4]["hidden"] and validate(applied) == []

@@ -34,6 +34,7 @@ ALLOWED_TOOLS = [
     "Bash(uv run tetclipper spec validate:*)",
     "Bash(uv run tetclipper spec show:*)",
     "Bash(uv run tetclipper audio list:*)",
+    "Bash(uv run tetclipper spec dead-air:*)",
 ]
 
 GUIDE = """# Studio clip editor
@@ -61,11 +62,27 @@ Job {job_id}, clip {clip}: "{title}".
   speaks (0.35 = speech stays clear). Tracks the user added live in `assets/`;
   the user's music library is listed by `uv run tetclipper audio list --kind music`
   (copy a track into assets by asking the user to pick it in the Music tab).
+- To remove silences / dead air, run
+  `uv run tetclipper spec dead-air {job_id} --clip {clip} [--mode natural|tight] [--fillers] --apply`
+  (without --apply it only previews). natural keeps short sentence pauses,
+  tight is snappier; both keep pauses near laughter. Report cuts and seconds saved.
 - `cuts`: `[{{start, end}}]` — spans removed from the middle of the clip. Snap
   to word boundaries (word.start / previous word.end) so nothing is clipped.
 - `words`: `[{{text, start, end, emphasis?, hidden?, speaker?}}]` — captions.
-  Fix a misheard word by changing `text` (keep the timing). `hidden: true`
-  removes it from captions only. `emphasis: true` = highlighted colour.
+  Fix a misheard word by changing `text`. NEVER add or remove entries in
+  `words`: to replace N misheard words with fewer, put the new words on the
+  first ones and set `hidden: true` on the rest (you may spread start/end over
+  the span). `hidden: true` removes a word from captions only (audio stays).
+  `emphasis: true` = highlighted colour. Every fix is learned automatically and
+  applied to future clips.
+- `doubts`: `[{{from, to, reason, alt?}}]` — caption spans the speech model may
+  have misheard (listed under "To check" in transcript.md). `alt` is what a
+  second listen with the model forced to Swahili heard. The speaker mixes
+  English, Swahili and Sheng mid-sentence: the English model often writes
+  Swahili as English-sounding nonsense ("able to show me" for "ebu tusome").
+  Use your Swahili/Sheng knowledge and the context to pick the reading that
+  makes sense; if neither does, don't invent words — tell the user the time
+  (m:ss) to listen to. Fixing a span's words resolves its doubt.
 - `captions`: `{{enabled, style, position?, maxWords?, size?, color?,
   activeColor?, emphasisColor?, uppercase?, emoji?}}`
   - style: classic | beast | hormozi | minimal | karaoke-pop | sermon |

@@ -50,6 +50,7 @@ def analyze(row: dict, start: float | None, end: float | None, captions: str | N
         from ..spec import build as spec_build
         from ..spec import store as spec_store
 
+        _use_glossary(row.get("glossary"))
         queue.import_job(row["id"], row["source_type"], row["source"], row["settings_json"], row.get("title"))
         job = queue.get_job(row["id"])
         wanted = stages or ["ingest", "asr", "diarize", "events"]
@@ -71,11 +72,30 @@ def analyze(row: dict, start: float | None, end: float | None, captions: str | N
     return _threaded(work)
 
 
-def build_spec(job_id: str, clip: int, captions: str | None) -> dict:
+def _use_glossary(data: dict | None) -> None:
+    """The PC's word list is the source of truth; mirror it before ASR/specs."""
+    if data:
+        from ..spec import glossary
+
+        glossary.save(data)
+
+
+def second_listen(job_id: str, request: dict) -> list[dict]:
+    """The Swahili second listen on the GPU, for spans the PC already found.
+    request: {words, spans, hotwords?, model?}"""
+    from ..config import jobs_dir
+    from ..spec import doubts
+
+    return doubts.second_opinion(jobs_dir() / job_id / "audio16k.wav", request["words"], request["spans"],
+                                 request.get("hotwords", ""), request.get("model"))
+
+
+def build_spec(job_id: str, clip: int, captions: str | None, glossary_data: dict | None = None) -> dict:
     """Camera + spec for one scored clip (fanned out across containers)."""
     from ..config import jobs_dir
     from ..spec import build as spec_build
 
+    _use_glossary(glossary_data)
     spec_build.build(jobs_dir() / job_id, clip, style=captions)
     return {"clip": clip}
 

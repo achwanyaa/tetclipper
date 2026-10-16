@@ -55,8 +55,11 @@ image = (
         # the live mount at /root must win, for the server and its CLI subprocesses.
         "PYTHONPATH": "/root",
         "PYTHONUNBUFFERED": "1",
+        # Hugging Face's xet transfer keeps log files open on the volume, which
+        # blocks volume.reload() in a warm container.
+        "HF_HUB_DISABLE_XET": "1",
     })
-    .add_local_dir(str(HERE / "tetclipper_pipeline"), remote_path="/root/tetclipper_pipeline")
+    .add_local_dir(str(HERE / "tetclipper_pipeline"), remote_path="/root/tetclipper_pipeline", ignore=["**/__pycache__/**"])
     .add_local_dir(str(REPO / "studio" / "editor" / "dist"), remote_path="/root/studio-dist")
 )
 
@@ -82,7 +85,7 @@ render_image = (
     )
     .pip_install("numpy")  # the music mix (cloud/remote.py)
     .env({"TETCLIPPER_BUNDLE": "/root/bundle", "PYTHONPATH": "/root"})
-    .add_local_dir(str(HERE / "tetclipper_pipeline"), remote_path="/root/tetclipper_pipeline")
+    .add_local_dir(str(HERE / "tetclipper_pipeline"), remote_path="/root/tetclipper_pipeline", ignore=["**/__pycache__/**"])
 )
 
 
@@ -150,8 +153,22 @@ def analyze(row: dict, start: float | None, end: float | None, captions: str | N
         volume.commit()
 
 
-@app.function(image=image, volumes={HOME: volume}, timeout=20 * 60, cpu=8.0, memory=8192)
-def build_spec(job_id: str, clip: int, captions: str | None = None) -> dict:
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=10 * 60, cpu=4.0, memory=8192)
+def second_listen(job_id: str, request: dict) -> list:
+    """Swahili second listen over doubtful caption spans ({words, spans, hotwords?, model?})."""
+    _in_root()
+    _mark_deps_synced()
+    try:
+        volume.reload()
+    except RuntimeError:  # a model download in this container still holds files open; our view is current
+        pass
+    from tetclipper_pipeline.cloud import remote
+
+    return remote.second_listen(job_id, request)
+
+
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=20 * 60, cpu=8.0, memory=8192)
+def build_spec(job_id: str, clip: int, captions: str | None = None, glossary: dict | None = None) -> dict:
     """Smart camera + spec for one found moment (mapped across clips by `find`)."""
     _in_root()
     _mark_deps_synced()
@@ -159,7 +176,7 @@ def build_spec(job_id: str, clip: int, captions: str | None = None) -> dict:
     from tetclipper_pipeline.cloud import remote
 
     try:
-        return remote.build_spec(job_id, clip, captions)
+        return remote.build_spec(job_id, clip, captions, glossary)
     finally:
         volume.commit()
 

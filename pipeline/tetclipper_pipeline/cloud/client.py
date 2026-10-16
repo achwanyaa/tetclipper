@@ -141,8 +141,10 @@ def analyze(job, start: float | None, end: float | None, captions: str | None, e
     Range mode builds the clip spec too; find mode runs just `stages`."""
     job_dir = Path(job.dir)
     push_files(job_dir, ["ingest.json", "media.mp4", "audio16k.wav"], emit)
+    from ..spec import glossary
+
     row = {"id": job.id, "source_type": job.source_type, "source": job.source,
-           "settings_json": job.settings_json, "title": job.title}
+           "settings_json": job.settings_json, "title": job.title, "glossary": glossary.load()}
     emit("cloud", -1, "Starting the cloud GPU…")
     t0 = time.time()
     result = _relay(_fn("analyze").remote_gen(row, start, end, captions, stages), emit)
@@ -157,10 +159,25 @@ def build_specs(job_dir: Path, clips: list[int], captions: str | None, emit: Emi
     push_files(job_dir, ["score.json", "clip_edits.json"], emit)
     emit("spec", -1, f"Directing the camera for {len(clips)} clips in parallel…")
     done = 0
-    for _ in _fn("build_spec").starmap([(job_dir.name, c, captions) for c in clips]):
+    from ..spec import glossary
+
+    words = glossary.load()
+    for _ in _fn("build_spec").starmap([(job_dir.name, c, captions, words) for c in clips]):
         done += 1
         emit("spec", done / len(clips), f"Clip {done}/{len(clips)} ready")
     pull_job(job_dir, emit, only="studio")
+
+
+def second_opinion(job_dir: Path, words: list[dict], spans: list[dict], hotwords: str) -> list[dict]:
+    """Run the Swahili second listen on a Modal GPU (seconds, vs minutes on a laptop CPU)."""
+    job_dir = Path(job_dir)
+    try:
+        have = {e.path.rsplit("/", 1)[-1] for e in _volume().listdir(f"/jobs/{job_dir.name}")}
+    except Exception:  # noqa: BLE001 — never sent to the cloud yet
+        have = set()
+    if "audio16k.wav" not in have:
+        push_files(job_dir, ["audio16k.wav"], lambda *a: None)
+    return _fn("second_listen").remote(job_dir.name, {"words": words, "spans": spans, "hotwords": hotwords})
 
 
 def render(job_dir: Path, clip: int, emit: Emit) -> Path:

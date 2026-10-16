@@ -58,6 +58,19 @@ def save(job_dir: Path, clip_idx: int, spec: dict, reason: str = "") -> dict:
     if problems:
         raise ValueError("invalid spec: " + "; ".join(problems))
     d = clip_dir(job_dir, clip_idx)
+    hist_now = _history(job_dir, clip_idx)
+    if hist_now and not reason.startswith("built"):
+        # Every caption fix (the user's or Claude's) teaches the word list.
+        from . import glossary
+
+        try:
+            previous = json.loads(hist_now[-1].read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous = None
+        if previous is not None:
+            glossary.learn(previous.get("words", []), spec.get("words", []))
+            if not reason.startswith("checked captions"):
+                spec = {**spec, "doubts": _unresolved(previous, spec)}
     (d / "history").mkdir(parents=True, exist_ok=True)
     text = json.dumps(spec, indent=1, ensure_ascii=False)
     hist = _history(job_dir, clip_idx)
@@ -71,6 +84,23 @@ def save(job_dir: Path, clip_idx: int, spec: dict, reason: str = "") -> dict:
     (d / "spec.json").write_text(text, encoding="utf-8")
     write_transcript(job_dir, clip_idx, spec)
     return spec
+
+
+def _unresolved(previous: dict, spec: dict) -> list[dict]:
+    """Doubts still worth showing: a span whose words were edited is resolved."""
+    old_w, new_w = previous.get("words", []), spec.get("words", [])
+    keep = []
+    for d in spec.get("doubts", []):
+        a, b = d["from"], d["to"]
+        if b >= len(new_w):
+            continue
+        same = len(old_w) == len(new_w) and all(
+            old_w[i].get("text") == new_w[i].get("text") and bool(old_w[i].get("hidden")) == bool(new_w[i].get("hidden"))
+            for i in range(a, b + 1)
+        )
+        if same:
+            keep.append(d)
+    return keep
 
 
 def sync_from_disk(job_dir: Path, clip_idx: int, reason: str = "edited") -> tuple[dict | None, list[str]]:

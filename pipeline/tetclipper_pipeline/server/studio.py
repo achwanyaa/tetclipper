@@ -257,6 +257,53 @@ def studio_telegram(jobId: str, clip: int, caption: str | None = None) -> Any:
 
 
 @command
+def studio_dead_air(jobId: str, clip: int, mode: str = "natural", fillers: bool = False, apply: bool = False) -> dict:
+    """Preview (or apply) dead-air cuts for a clip."""
+    from ..spec import silence
+
+    job_dir = _job_dir(jobId)
+    spec = store.load(job_dir, clip)
+    if spec is None:
+        raise CommandError("This clip has no spec yet.")
+    if mode not in silence.MODES:
+        raise CommandError(f"mode must be one of {', '.join(silence.MODES)}")
+    found = silence.find(spec, job_dir, mode, fillers)
+    out = {"cuts": len(found["cuts"]), "saved": found["saved"], "fillers": len(found["filler_words"])}
+    if apply and (found["cuts"] or found["filler_words"]):
+        reason = f"remove dead air ({mode}): {len(found['cuts'])} cuts, -{found['saved']:.1f}s"
+        saved = store.save(job_dir, clip, silence.apply(spec, found), reason=reason)
+        watcher.note(job_dir, clip)
+        _publish_spec(job_dir, clip, saved, "editor")
+        out.update(spec=saved, history=store.history(job_dir, clip))
+    return out
+
+
+@command
+def studio_doubts(jobId: str, clip: int) -> None:
+    """Re-check a clip's captions (doubtful spans + a Swahili second listen)."""
+    job_dir = _job_dir(jobId)
+    watcher.watch(job_dir, clip)
+    stream_pipeline(["spec", "doubts", job_dir.name, "--clip", str(clip)])
+
+
+@command
+def glossary_get() -> dict:
+    from ..spec import glossary
+
+    data = glossary.load()
+    have = {glossary.norm(p) for p in data["phrases"]}
+    return {**data, "suggestions": [p for p in glossary.SEED_PHRASES if glossary.norm(p) not in have]}
+
+
+@command
+def glossary_save(data: dict) -> dict:
+    from ..spec import glossary
+
+    glossary.save(data)
+    return glossary_get()
+
+
+@command
 def studio_chat_send(jobId: str, clip: int, message: str, context: dict | None = None) -> None:
     job_dir = _job_dir(jobId)
     if not message.strip():

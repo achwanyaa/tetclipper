@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Word } from '@tetclipper/composition'
 import { fmt } from '../api'
 import type { PanelProps } from './Canvas'
+import { CheckBar } from './CheckBar'
 
 /** Phrases like transcript.md: break at sentence ends, pauses and speaker changes. */
 function phrases(words: Word[]): number[][] {
@@ -19,13 +20,19 @@ function phrases(words: Word[]): number[][] {
 }
 
 /** Caption words: click to seek, double-click to fix, shift-click to select a span. */
-export function Transcript({ spec, editor, setEditor, update, seek }: PanelProps) {
+export function Transcript(props: PanelProps) {
+  const { spec, editor, setEditor, update, seek } = props
   const words = spec.words ?? []
   const cuts = spec.cuts ?? []
   const [editing, setEditing] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
   const [anchor, setAnchor] = useState<number | null>(null)
   const groups = useMemo(() => phrases(words), [words])
+  const doubtful = useMemo(() => {
+    const set = new Set<number>()
+    for (const d of spec.doubts ?? []) for (let i = d.from; i <= d.to; i++) set.add(i)
+    return set
+  }, [spec.doubts])
   const sel = editor.selection
   const inRange = (w: Word) => w.end > spec.source.start && w.start < spec.source.end
   const inCut = (w: Word) => cuts.some((c) => (w.start + w.end) / 2 >= c.start && (w.start + w.end) / 2 < c.end)
@@ -66,6 +73,7 @@ export function Transcript({ spec, editor, setEditor, update, seek }: PanelProps
 
   return (
     <div className="transcript">
+      <CheckBar {...props} />
       <div className="transcript-actions">
         {sel ? (
           <>
@@ -117,7 +125,7 @@ export function Transcript({ spec, editor, setEditor, update, seek }: PanelProps
                 return (
                   <span
                     key={i}
-                    className={['w', active && 'active', selected && 'selected', w.hidden && 'hidden', w.emphasis && 'emph', inCut(w) && 'incut']
+                    className={['w', active && 'active', selected && 'selected', doubtful.has(i) && 'doubt', w.hidden && 'hidden', w.emphasis && 'emph', inCut(w) && 'incut']
                       .filter(Boolean)
                       .join(' ')}
                     title={`${fmt(w.start)} · #${i}${inCut(w) ? ' · cut (click ✂ to restore)' : ''}`}

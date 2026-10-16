@@ -6,7 +6,8 @@ const EXAMPLES = [
   'Use sermon captions and put them a bit higher',
   'Cut the first sentence and any long pauses',
   'Add a title card for the first 3 seconds with the main point',
-  'Fix any misheard words in the captions'
+  'Check the doubtful captions (Swahili/Sheng) and fix what you can',
+  'Remove the dead air'
 ]
 
 /** Chat with Claude Code about the open clip. Edits land in spec.json and

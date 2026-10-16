@@ -17,6 +17,7 @@ this PC and the Modal volume; the editor and renderer turn them into URLs.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .. import config
@@ -118,6 +119,12 @@ def keyframes_from_trajectory(traj: dict, src_w: int, src_h: int, clip_start: fl
 def words_for(job_dir: Path, start: float, end: float, word_edits: dict[str, str]) -> list[dict]:
     """Caption words in [start, end) with emphasis flags and any text fixes
     (an empty fix hides the word)."""
+    return words_and_scores(job_dir, start, end, word_edits)[0]
+
+
+def words_and_scores(job_dir: Path, start: float, end: float,
+                     word_edits: dict[str, str]) -> tuple[list[dict], dict[int, float]]:
+    """words_for() plus each word's alignment score, by index (for doubts)."""
     from ..edits.timeline import word_key
 
     diarize = _stage(job_dir, "diarize")
@@ -131,7 +138,10 @@ def words_for(job_dir: Path, start: float, end: float, word_edits: dict[str, str
         curves = json.loads(Path(events["curves_path"]).read_text(encoding="utf-8"))
         ass_mod.mark_emphasis(flags, curves["rms"], float(curves["grid_sec"]), clip_start=start)
     words = []
+    scores: dict[int, float] = {}
     for w, flagged in zip(raw, flags):
+        if w.get("score") is not None:
+            scores[len(words)] = float(w["score"])
         fix = word_edits.get(word_key(w["start"]))
         text = (fix if fix is not None else w["word"]).strip()
         item = {"text": text or w["word"].strip(), "start": round(w["start"], 3), "end": round(w["end"], 3)}
@@ -142,7 +152,27 @@ def words_for(job_dir: Path, start: float, end: float, word_edits: dict[str, str
         if w.get("speaker") is not None:
             item["speaker"] = f"S{w['speaker']}"
         words.append(item)
-    return words
+    return words, scores
+
+
+def find_doubts(job_dir: Path, words: list[dict], scores: dict[int, float], emit=lambda f, m: None) -> list[dict]:
+    """Doubtful spans, each re-heard in Swahili when the second opinion is on."""
+    from . import doubts
+
+    spans = doubts.detect(words, scores)
+    if spans and doubts.enabled():
+        emit(-1, f"Re-listening to {len(spans)} doubtful span(s) in Swahili…")
+        audio = Path(_stage(job_dir, "ingest")["audio_path"])
+        try:
+            from ..cloud import client
+
+            if client.available() and not os.environ.get("MODAL_TASK_ID"):  # on the PC: use the cloud GPU
+                spans = client.second_opinion(job_dir, words, spans, "")
+            else:
+                spans = doubts.second_opinion(audio, words, spans, "")
+        except Exception as err:  # noqa: BLE001 — the spans are still worth showing
+            emit(-1, f"Second listen failed: {err}")
+    return spans
 
 
 # --- the spec ------------------------------------------------------------------
@@ -189,6 +219,12 @@ def build(job_dir: Path, clip_idx: int, *, style: str | None = None, camera: boo
         traj = _trajectory(job_dir, clip_idx, edit, score_clip, settings, emit)
         keyframes, punches = keyframes_from_trajectory(traj, src_w, src_h, edit.start)
 
+    from . import glossary
+
+    words, scores = words_and_scores(job_dir, edit.start, edit.end, edit.word_edits)
+    words, fixed = glossary.apply_fixes(words)  # what the user taught it on earlier clips
+    found = find_doubts(job_dir, words, scores, emit)
+
     preset = style or edit.caption_preset or settings.caption_preset
     spec = {
         "version": 1,
@@ -202,16 +238,45 @@ def build(job_dir: Path, clip_idx: int, *, style: str | None = None, camera: boo
         },
         "intro": None,
         "cuts": [],
-        "words": words_for(job_dir, edit.start, edit.end, edit.word_edits),
+        "words": words,
         "captions": {"enabled": True, "style": preset if preset in CAPTION_STYLES else DEFAULT_STYLE},
         "crop": {"keyframes": keyframes},
         "effects": punches,
         "progressBar": {"enabled": False, "color": "#FFD700"},
+        "doubts": found,
     }
     if spec["title"] is None:
         del spec["title"]
     problems = validate(spec)
     if problems:
         raise ValueError("built an invalid spec: " + "; ".join(problems[:5]))
-    store.save(job_dir, clip_idx, spec, reason="built from analysis")
+    note = f"built from analysis ({fixed} learned fix{'es' if fixed != 1 else ''} applied)" if fixed else "built from analysis"
+    store.save(job_dir, clip_idx, spec, reason=note)
+    return spec
+
+
+def refresh_doubts(job_dir: Path, clip_idx: int, emit=lambda f, m: None) -> dict:
+    """Recompute doubts (and the Swahili second listen) on a clip's current
+    words, keeping every edit. Alignment scores come from the analysis, matched
+    by word start time."""
+    job_dir = Path(job_dir)
+    spec = store.load(job_dir, clip_idx)
+    if spec is None:
+        raise ValueError(f"clip {clip_idx} has no spec yet")
+    diarize = _stage(job_dir, "diarize")
+    by_start = {round(w["start"], 2): w.get("score") for seg in diarize["segments"] for w in seg.get("words", [])
+                if w.get("start") is not None}
+    raw_text = {round(w["start"], 2): w["word"] for seg in diarize["segments"] for w in seg.get("words", [])
+                if w.get("start") is not None}
+    scores = {i: float(by_start[round(w["start"], 2)]) for i, w in enumerate(spec["words"])
+              if by_start.get(round(w["start"], 2)) is not None}
+    # Words someone already fixed (text differs from what the speech model
+    # wrote, or retimed so they no longer match) are trusted, not re-flagged.
+    from .glossary import norm
+
+    edited = {i for i, w in enumerate(spec["words"])
+              if norm(raw_text.get(round(w["start"], 2), "")) != norm(w["text"]) or w.get("hidden")}
+    words = [{**w, "hidden": True} if i in edited else w for i, w in enumerate(spec["words"])]
+    spec = {**spec, "doubts": find_doubts(job_dir, words, scores, emit)}
+    store.save(job_dir, clip_idx, spec, reason=f"checked captions: {len(spec['doubts'])} span(s) to verify")
     return spec

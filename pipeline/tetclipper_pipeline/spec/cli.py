@@ -40,6 +40,17 @@ def add_parser(sub) -> None:
     p_undo.add_argument("job_id")
     p_undo.add_argument("--clip", type=int, default=0)
 
+    p_dead = spec_sub.add_parser("dead-air", help="find (or with --apply, cut) long pauses and um/uh fillers")
+    p_dead.add_argument("job_id")
+    p_dead.add_argument("--clip", type=int, default=0)
+    p_dead.add_argument("--mode", choices=["natural", "tight"], default="natural")
+    p_dead.add_argument("--fillers", action="store_true", help="also cut isolated um/uh/erm/ah/hmm")
+    p_dead.add_argument("--apply", action="store_true", help="add the cuts to the spec (one Undo reverts)")
+
+    p_doubts = spec_sub.add_parser("doubts", help="re-check captions: flag doubtful spans + Swahili second listen")
+    p_doubts.add_argument("job_id")
+    p_doubts.add_argument("--clip", type=int, default=0)
+
     p_render = spec_sub.add_parser("render", help="render a clip's spec to studio/clip_NN/render.mp4 (Remotion)")
     p_render.add_argument("job_id")
     p_render.add_argument("--clip", type=int, default=0)
@@ -129,6 +140,34 @@ def run(args: argparse.Namespace) -> int:
             }))
             return 1
         print(json.dumps({"ok": True, **_summary(job_dir, args.clip, spec)}))
+        return 0
+
+    if args.spec_cmd == "dead-air":
+        from . import silence
+
+        spec = store.load(job_dir, args.clip)
+        if spec is None:
+            print(json.dumps({"ok": False, "error": f"no spec for clip {args.clip}"}))
+            return 1
+        found = silence.find(spec, job_dir, args.mode, args.fillers)
+        if args.apply and (found["cuts"] or found["filler_words"]):
+            reason = f"remove dead air ({args.mode}): {len(found['cuts'])} cuts, -{found['saved']:.1f}s"
+            if found["filler_words"]:
+                reason += f", {len(found['filler_words'])} fillers"
+            store.save(job_dir, args.clip, silence.apply(spec, found), reason=reason)
+        print(json.dumps({"ok": True, "applied": bool(args.apply), "cuts": len(found["cuts"]),
+                          "saved_seconds": found["saved"], "fillers": len(found["filler_words"]),
+                          "kept_pauses": found["kept"][:20], "new_cuts": found["cuts"][:50]}))
+        return 0
+
+    if args.spec_cmd == "doubts":
+        emit = _progress_printer(args.jsonl)
+        try:
+            spec = build_mod.refresh_doubts(job_dir, args.clip, lambda f, m: emit("doubts", f, m))
+        except Exception as err:  # noqa: BLE001
+            _emit_result(args.jsonl, {"ok": False, "error": str(err)})
+            return 1
+        _emit_result(args.jsonl, {"ok": True, "doubts": spec["doubts"]})
         return 0
 
     if args.spec_cmd == "render":

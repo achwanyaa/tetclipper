@@ -71,6 +71,13 @@ def render(job_dir: Path, spec: dict) -> str:
         lines.append(
             f"[{first['start']:.2f}–{last['end']:.2f}] {first.get('speaker', '')} #{idx[0]}-{idx[-1]}{mark}: {text}"
         )
+    doubts = [d for d in spec.get("doubts", []) if d["to"] < len(words)]
+    if doubts:
+        lines += ["", "To check (the speech model may have misheard; Swahili/Sheng often comes out as English-sounding words):"]
+        for d in doubts:
+            span = " ".join(w["text"] for w in words[d["from"] : d["to"] + 1] if not w.get("hidden"))
+            alt = f' · Swahili listen heard: "{d["alt"]}"' if d.get("alt") else ""
+            lines.append(f'?? [{words[d["from"]]["start"]:.2f}] #{d["from"]}-{d["to"]} "{span}" ({d["reason"]}){alt}')
     events = _events(job_dir, src["start"], src["end"])
     if events:
         lines += ["", "Audio events: " + ", ".join(events)]

@@ -1,8 +1,10 @@
-import { fmt } from '../api'
+import { useEffect, useState } from 'react'
+import type { ClipSpecInput } from '@tetclipper/composition'
+import { fmt, invoke } from '../api'
 import type { PanelProps } from './Canvas'
 
 /** Clip range (source seconds) and the list of cuts. */
-export function TrimPanel({ spec, editor, update, seek }: PanelProps) {
+export function TrimPanel({ data, spec, editor, update, seek, setError }: PanelProps) {
   const { start, end } = spec.source
   const cuts = spec.cuts ?? []
   const words = spec.words ?? []
@@ -12,11 +14,55 @@ export function TrimPanel({ spec, editor, update, seek }: PanelProps) {
     if (b - a < 1) return
     update({ ...spec, source: { ...spec.source, start: +a.toFixed(3), end: +b.toFixed(3) } }, reason)
   }
+  const [mode, setMode] = useState<'natural' | 'tight'>('natural')
+  const [fillers, setFillers] = useState(false)
+  const [preview, setPreview] = useState<{ cuts: number; saved: number; fillers: number } | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    invoke<{ cuts: number; saved: number; fillers: number }>('studio_dead_air', { jobId: data.jobId, clip: data.clip, mode, fillers })
+      .then((p) => live && setPreview(p))
+      .catch(() => live && setPreview(null))
+    return () => {
+      live = false
+    }
+  }, [data.jobId, data.clip, mode, fillers, spec.cuts, spec.words])
+
+  const removeDeadAir = async () => {
+    setBusy(true)
+    try {
+      const res = await invoke<{ spec?: ClipSpecInput }>('studio_dead_air', { jobId: data.jobId, clip: data.clip, mode, fillers, apply: true })
+      if (res.spec) update(res.spec, `remove dead air (${mode})`)
+    } catch (e) {
+      setError(String((e as Error).message ?? e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const nudge = (which: 'start' | 'end', by: number) =>
     which === 'start' ? setRange(Math.max(0, start + by), end, 'trim start') : setRange(start, end + by, 'trim end')
 
   return (
     <div className="trim-panel">
+      <div className="trim-row dead-air">
+        <span>Dead air</span>
+        <select value={mode} onChange={(e) => setMode(e.target.value as 'natural' | 'tight')} title="natural keeps short sentence pauses; tight is snappier">
+          <option value="natural">Natural</option>
+          <option value="tight">Tight</option>
+        </select>
+        <label className="toggle small">
+          <input type="checkbox" checked={fillers} onChange={(e) => setFillers(e.target.checked)} />
+          also ums/uhs
+        </label>
+        <button className="primary" disabled={busy || !preview || (preview.cuts === 0 && preview.fillers === 0)} onClick={removeDeadAir}>
+          {busy ? 'Cutting…' : 'Remove dead air'}
+        </button>
+        <span className="muted small">
+          {preview ? (preview.cuts || preview.fillers ? `${preview.cuts} cuts · −${preview.saved.toFixed(1)} s${preview.fillers ? ` · ${preview.fillers} fillers` : ''}` : 'nothing to cut') : ''}
+        </span>
+      </div>
       <div className="trim-row">
         <span>Start</span>
         <button className="link" onClick={() => seek(start)}>

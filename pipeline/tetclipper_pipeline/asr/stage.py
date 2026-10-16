@@ -157,6 +157,18 @@ def _decode_with_ffmpeg(path: Path):
     return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
 
 
+def _mixed_language_hints() -> dict:
+    """Kenyan sermons switch between English, Swahili and Sheng mid-sentence.
+    A mixed-language example as the initial prompt, and the learned word list
+    as hotwords, nudge Whisper to write Swahili as Swahili instead of
+    English-sounding words. TETCLIPPER_ASR_HINTS=0 turns this off."""
+    if os.environ.get("TETCLIPPER_ASR_HINTS", "1") == "0":
+        return {}
+    from ..spec import glossary
+
+    return {"initial_prompt": glossary.INITIAL_PROMPT, "hotwords": glossary.hotwords() or None}
+
+
 def _point_caches_at_home() -> None:
     """All model caches live under TETCLIPPER_HOME so 'delete the app data
     dir' is a complete uninstall."""
@@ -208,7 +220,8 @@ class AsrStage(Stage):
             model = None
             try:
                 model = whisperx.load_model(
-                    spec.name, device, compute_type=compute_type, vad_method="silero"
+                    spec.name, device, compute_type=compute_type, vad_method="silero",
+                    asr_options=_mixed_language_hints(),
                 )
                 ctx.emit(-1, "Transcribing…")
                 forced = getattr(ctx.settings, "language", None) or None

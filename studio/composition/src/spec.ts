@@ -112,6 +112,18 @@ export const clipSpecSchema = z.object({
     .nullable()
     .default(null),
   words: z.array(wordSchema).default([]),
+  // Caption spans worth checking by ear (the composition ignores these). `alt`
+  // is what a Swahili-forced second listen heard; from/to index `words`.
+  doubts: z
+    .array(
+      z.object({
+        from: z.number().int().min(0),
+        to: z.number().int().min(0),
+        reason: z.string(),
+        alt: z.string().optional()
+      })
+    )
+    .default([]),
   captions: z
     .object({
       enabled: z.boolean().default(true),
@@ -145,6 +157,7 @@ export type CropKeyframe = z.infer<typeof cropKeyframeSchema>
 export type Effect = z.infer<typeof effectSchema>
 export type EffectInput = z.input<typeof effectSchema>
 export type Cut = z.infer<typeof cutSchema>
+export type Doubt = z.infer<typeof clipSpecSchema>['doubts'][number]
 export type Music = NonNullable<z.infer<typeof clipSpecSchema>['music']>
 export type ClipSpec = z.infer<typeof clipSpecSchema>
 export type ClipSpecInput = z.input<typeof clipSpecSchema>
