@@ -45,6 +45,7 @@ interface Props {
   run: Run | null
   onRender: () => void
   setError: (e: string | null) => void
+  online?: boolean // hosted app: Telegram is linked per server, not per user, so it's hidden
 }
 
 const clock = (frames: number) => {
@@ -54,7 +55,7 @@ const clock = (frames: number) => {
 
 /** Edit step: big live preview, lane timeline and Claude bar on the left;
  *  the tool inspector with the render/share footer on the right. */
-export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRender, setError }: Props) {
+export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRender, setError, online = false }: Props) {
   const player = useRef<PlayerRef>(null)
   const [tab, setTab] = useState<Tab>('Look')
   const [frame, setFrame] = useState(0)
@@ -194,7 +195,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
           {tab === 'Effects' && <EffectsPanel {...panel} />}
           {tab === 'Trim' && <TrimPanel {...panel} />}
         </div>
-        <RenderFooter data={data} run={run} onRender={onRender} setError={setError} />
+        <RenderFooter data={data} run={run} onRender={onRender} setError={setError} online={online} />
       </aside>
     </div>
   )
@@ -202,7 +203,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
 
 /** Render / share area at the foot of the inspector: rendering, failed,
  *  never rendered, up to date, or edited since the last render. */
-function RenderFooter({ data, run, onRender, setError }: { data: ClipData; run: Run | null; onRender: () => void; setError: (e: string | null) => void }) {
+function RenderFooter({ data, run, onRender, setError, online }: { data: ClipData; run: Run | null; onRender: () => void; setError: (e: string | null) => void; online: boolean }) {
   const [sending, setSending] = useState(false)
   const rendering = run?.kind === 'render' && run.jobId === data.jobId && run.clip === data.clip
   const latest = data.history[data.history.length - 1]?.version ?? 0
@@ -283,14 +284,14 @@ function RenderFooter({ data, run, onRender, setError }: { data: ClipData; run: 
         </button>
       )}
 
-      {r && (
+      {r && (!fresh || !online) && (
         <div className="more">
           {!fresh && (
             <a className="btn" href={download}>
               Download older
             </a>
           )}
-          {telegram}
+          {!online && telegram}
         </div>
       )}
     </div>

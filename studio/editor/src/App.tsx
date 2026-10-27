@@ -310,6 +310,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
             run={run}
             onRender={startRender}
             setError={setError}
+            online={!!account}
           />
         ) : (
           <div className="home">

@@ -103,6 +103,36 @@ class FakeOpenAI:
         return NS(usage=usage, choices=[NS(finish_reason="stop", message=NS(content="Minimal now.", tool_calls=None))])
 
 
+def test_find_moments_judging_with_an_api_model(tmp_path, monkeypatch):
+    """Online Find moments: the admin's model answers the judging prompts;
+    what's missing is asked again and the rounds' answers are combined."""
+    from tetclipper_pipeline.scoring import auto_brain, brain
+
+    schema = {"type": "object", "properties": {"score": {"type": "integer"}}, "required": ["score"]}
+    request = {"job_id": "j", "purpose": "score", "items": [
+        {"id": "a", "prompt": "Rate moment A", "schema": schema},
+        {"id": "b", "prompt": "Rate moment B", "schema": schema},
+    ]}
+    replies = iter(['```json\n{"a": {"score": 7}}\n```', '{"b": {"score": 4}}'])
+    asked = []
+
+    def complete(system, prompt):
+        asked.append(prompt)
+        return next(replies)
+
+    applied = []
+
+    def apply(job_dir, answers):
+        applied.append(dict(answers))
+        return {"written": len(answers), "missing": [i["id"] for i in request["items"] if i["id"] not in answers], "errors": {}}
+
+    monkeypatch.setattr(brain, "apply_answers", apply)
+    auto_brain._answer_with_api(tmp_path, request, lambda f, m: None, NS(complete=complete))
+    assert applied[-1] == {"a": {"score": 7}, "b": {"score": 4}}
+    assert "--- id b" in asked[1] and "--- id a" not in asked[1]
+    assert "tetclipper brain answer" not in asked[0]
+
+
 @pytest.mark.parametrize("loop, client, style", [
     (agent._loop_anthropic, FakeAnthropic, "beast"),
     (agent._loop_openai, FakeOpenAI, "minimal"),

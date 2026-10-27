@@ -84,15 +84,19 @@ DEFAULT = {"provider": "claude-code", "model": "", "base_url": "", "keys": {}, "
 
 
 def _path() -> Path:
-    from .app import home_dir  # lazy: app imports studio, which imports this module
+    # The shared home (not a user's workspace): one setting for everyone. The
+    # pipeline CLI reads it too (Find moments), so no web-server imports here.
+    from .. import config
 
-    return home_dir() / "ai.json"
+    return config.home_dir() / "ai.json"
 
 
 def load_settings() -> dict:
-    from .app import _read_json
-
-    data = {**DEFAULT, **(_read_json(_path()) or {})}
+    try:
+        saved = json.loads(_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    data = {**DEFAULT, **(saved if isinstance(saved, dict) else {})}
     if data["provider"] not in PROVIDERS:
         data["provider"] = "claude-code"
     return data
@@ -231,6 +235,38 @@ def _api_error(err: Exception) -> str:
     if name == "APIConnectionError":
         return "Couldn't reach the provider. Check the internet connection or the base URL."
     return msg[:300]
+
+
+def uses_api() -> bool:
+    return PROVIDERS[load_settings()["provider"]]["kind"] != "cli"
+
+
+def complete(system: str, prompt: str, max_tokens: int = 16000) -> str:
+    """One plain request to the admin's model (no tools): Find moments' judging."""
+    s = load_settings()
+    provider = s["provider"]
+    p = PROVIDERS[provider]
+    model = s["model"] or p.get("default", "")
+    key = s["keys"].get(provider)
+    if not key:
+        raise RuntimeError("No API key is set for the AI model. The admin can add one under ✦ AI model.")
+    client = _client(provider, key, _base_url(provider, s))
+    try:
+        if p["kind"] == "anthropic":
+            kwargs: dict[str, Any] = dict(model=model, max_tokens=max_tokens, system=system, messages=[{"role": "user", "content": prompt}])
+            if model in EFFORT_MODELS:
+                kwargs["output_config"] = {"effort": "medium"}
+            r = client.messages.create(**kwargs)
+            if r.stop_reason == "refusal":
+                raise RuntimeError("The AI model declined this request.")
+            return "".join(b.text for b in r.content if b.type == "text")
+        r = client.chat.completions.create(model=model, max_tokens=min(max_tokens, 8192),
+                                           messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}])
+        return r.choices[0].message.content or ""
+    except RuntimeError:
+        raise
+    except Exception as err:  # noqa: BLE001 — shown to the user as a job error
+        raise RuntimeError(_api_error(err)) from err
 
 
 # ---------- the tools ----------
