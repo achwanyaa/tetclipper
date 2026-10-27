@@ -66,6 +66,8 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
     }
   }
 
+  // Older desktop servers don't report the engine: they only run Claude Code.
+  const engine = data.chat.engine ?? { provider: 'claude-code', model: '', label: 'Claude Code', ready: true }
   const last = [...messages].reverse().find((m) => m.role !== 'user')
   const ctxLabel = editor.selection ? `words ${editor.selection[0]}–${editor.selection[1]}` : editor.playhead !== null ? `at ${fmt(editor.playhead)}` : 'at start'
   const status = busy ? live.trim() || notes[notes.length - 1] || 'Claude is editing…' : last?.text ?? 'Ask Claude to change anything. It edits this clip and the preview updates live.'
@@ -85,7 +87,7 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
           </span>
         )}
         <span className="who" title="The AI model the admin chose">
-          {last?.model ?? data.chat.engine.label}
+          {last?.model ?? engine.label}
           {!busy && last?.cost != null ? ` · $${last.cost < 0.01 ? last.cost.toFixed(4) : last.cost.toFixed(3)}` : ''}
         </span>
         {!busy && last?.role === 'assistant' && canUndo && (
@@ -100,9 +102,10 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
 
       {!data.chat.available && (
         <span className="warn">
-          {data.chat.engine.provider === 'claude-code'
-            ? "Claude Code isn't installed on this machine. Install it and run `claude` once to sign in, or pick an API model under AI model."
-            : `No API key is set for ${data.chat.engine.label}. The admin can add one under AI model.`}
+          {data.chat.notice ??
+            (engine.provider === 'claude-code'
+              ? "Claude Code isn't installed on this machine. Install it and run `claude` once to sign in, or pick an API model under ✦ AI model."
+              : `No API key is set for ${engine.label}. The admin can add one under ✦ AI model.`)}
         </span>
       )}
 

@@ -130,7 +130,7 @@ export interface ClipData {
   title: string
   spec: ClipSpecInput
   history: HistoryEntry[]
-  chat: { messages: ChatMessage[]; busy: boolean; available: boolean; engine: Engine }
+  chat: { messages: ChatMessage[]; busy: boolean; available: boolean; engine: Engine; notice?: string | null }
   render: { output: string; spec_version: number | null; rendered_at: string } | null
 }
 

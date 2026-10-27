@@ -225,6 +225,17 @@ def context_line(ctx: dict | None) -> str:
     return f"[editor: {', '.join(bits)}]\n" if bits else ""
 
 
+def not_ready_notice(engine: dict) -> str:
+    """Why chat can't answer yet, worded for whoever is looking: online users
+    can't install anything, the admin picks the AI model for everyone."""
+    if engine["provider"] == "claude-code":
+        if os.environ.get("TETCLIPPER_AUTH", "").lower() == "supabase":
+            return "Chat isn't set up yet. The admin needs to choose an AI model under ✦ AI model."
+        return ("Claude Code isn't installed on this machine. Install it and run `claude` once to sign in, "
+                "or pick an API model under ✦ AI model.")
+    return f"No API key is set for {engine['label']}. The admin can add one under ✦ AI model."
+
+
 _busy: set[str] = set()
 _lock = threading.Lock()
 
@@ -245,7 +256,7 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
     use_api = agent.PROVIDERS[agent.load_settings()["provider"]]["kind"] != "cli"
     claude = None if use_api else find_claude()
     if not use_api and claude is None:
-        raise RuntimeError("Studio chat needs the Claude Code CLI installed and logged in on this machine.")
+        raise RuntimeError(not_ready_notice(agent.engine_label()))
     if use_api and save_spec is None:
         raise RuntimeError("save_spec is required for API chat.")
     with _lock:

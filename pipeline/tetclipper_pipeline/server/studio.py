@@ -140,6 +140,7 @@ def studio_clip(jobId: str, clip: int = 0) -> dict:
     render = _read_json(store.clip_dir(job_dir, clip) / "render.json")
     engine = agent.engine_label()
     available = engine["ready"] and (engine["provider"] != "claude-code" or studio_chat.find_claude() is not None)
+    notice = None if available else studio_chat.not_ready_notice(engine)
     return {
         "jobId": job_dir.name,
         "jobDir": str(job_dir),
@@ -148,7 +149,7 @@ def studio_clip(jobId: str, clip: int = 0) -> dict:
         "spec": spec,
         "history": store.history(job_dir, clip),
         "chat": {**studio_chat.history(job_dir, clip), "busy": studio_chat.busy(job_dir, clip),
-                 "available": available, "engine": engine},
+                 "available": available, "engine": engine, "notice": notice},
         "render": render,
     }
 
