@@ -143,7 +143,8 @@ def studio_jobs() -> list[dict]:
             "title": _title(job_dir),
             "section": settings.get("section"),
             "progress": progress,
-            "height": probe.get("height"),
+            # the source's short side: the p in 480p, landscape or vertical
+            "res": min((v for v in (probe.get("width"), probe.get("height")) if v), default=None),
             "clips": [
                 {
                     "clip": c,

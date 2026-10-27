@@ -248,26 +248,36 @@ def fetch_meta(url: str, progress: ProgressFn) -> UrlMeta:
     )
 
 
+# Up to 1080p in either orientation: cap the long side, not the height. A
+# vertical 1080p video is 1920 tall, so `height<=1080` took its 360x640 copy
+# (a Drive phone video, Oct 27 2026). Formats without a width still qualify.
+_LONG_SIDE = config.MAX_HEIGHT * 16 // 9
 DOWNLOAD_FORMAT = (
-    f"bv*[height<={config.MAX_HEIGHT}][ext=mp4]+ba[ext=m4a]"
-    f"/b[height<={config.MAX_HEIGHT}][ext=mp4]/b"
+    f"bv*[height<={_LONG_SIDE}][width<=?{_LONG_SIDE}][ext=mp4]+ba[ext=m4a]"
+    f"/b[height<={_LONG_SIDE}][width<=?{_LONG_SIDE}][ext=mp4]/b"
 )
+
+
+def short_side(width: int | None, height: int | None) -> int:
+    """The 'p' in 480p, for landscape and vertical video alike."""
+    return min(v for v in (width, height, 1 << 30) if v)
 
 _PCT_RE = re.compile(r"\[download\]\s+([\d.]+)%")
 
 
-def _probe_height(url: str, headers: dict) -> int | None:
-    """Height of a remote video, read from its header (a few seconds)."""
+def _probe_short_side(url: str, headers: dict) -> int | None:
+    """Short side of a remote video, read from its header (a few seconds)."""
     from ..render import ffmpeg_bin
 
     header_text = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
     try:
         out = subprocess.run(
             [ffmpeg_bin.ffprobe(), "-v", "error", *(["-headers", header_text] if header_text else []),
-             "-select_streams", "v:0", "-show_entries", "stream=height", "-of", "csv=p=0", url],
+             "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", url],
             capture_output=True, text=True, timeout=40,
         )
-        return int(out.stdout.strip().splitlines()[0])
+        width, height = (int(v) for v in out.stdout.strip().splitlines()[0].split(",")[:2])
+        return short_side(width, height)
     except (subprocess.TimeoutExpired, OSError, ValueError, IndexError):
         return None
 
@@ -282,13 +292,14 @@ def pick_format(meta: UrlMeta, progress: ProgressFn) -> str:
     if "GoogleDrive" not in (data.get("extractor_key"), data.get("extractor")):
         return DOWNLOAD_FORMAT
     formats = data.get("formats") or []
-    best = max((f.get("height") or 0 for f in formats if f.get("format_id") != "source"), default=0)
+    best = max((short_side(f.get("width"), f.get("height")) for f in formats
+                if f.get("format_id") != "source" and f.get("height")), default=0)
     source = next((f for f in formats if f.get("format_id") == "source" and f.get("url")), None)
     if best >= 720 or source is None:
         return DOWNLOAD_FORMAT
     progress(0.12, "Checking the original's quality…")
-    height = _probe_height(source["url"], source.get("http_headers") or {})
-    return "source" if height and height > best else DOWNLOAD_FORMAT
+    original = _probe_short_side(source["url"], source.get("http_headers") or {})
+    return "source" if original and original > best else DOWNLOAD_FORMAT
 
 
 def download(url: str, out_path: Path, progress: ProgressFn,

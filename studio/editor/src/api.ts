@@ -169,7 +169,7 @@ export interface JobSummary {
   title: string
   section: [number, number] | null
   progress?: JobProgress | null
-  height?: number | null // the downloaded source video's height
+  res?: number | null // the source video's short side: the p in 480p, landscape or vertical
   clips: { clip: number; rendered: boolean; style: string | null; score: number | null; summary: string | null }[]
 }
 

@@ -126,9 +126,9 @@ export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun
               {job.section ? `${fmt(job.section[0])} – ${fmt(job.section[1])} · ` : ''}
               {job.clips.length} {job.clips.length === 1 ? 'clip' : 'clips'}
             </span>
-            {job.height != null && job.height < 720 && (
+            {job.res != null && job.res < 720 && (
               <span className="tag wn" title="The video in Drive is low resolution, so vertical clips cut from it look soft. Upload a sharper original to Drive for better clips.">
-                {job.height}p source: clips will look soft
+                {job.res}p source: clips will look soft
               </span>
             )}
             <span className="spacer" />
