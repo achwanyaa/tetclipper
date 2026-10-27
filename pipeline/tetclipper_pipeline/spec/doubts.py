@@ -94,35 +94,49 @@ def is_alternative(current: str, heard: str) -> bool:
     return True
 
 
+def load_model(model_name: str):
+    """A faster-whisper model on this machine's device: a size name, a Hugging
+    Face repo, or a converted folder (asr/bench.py)."""
+    from faster_whisper import WhisperModel
+
+    from .. import config
+    from ..asr.stage import _point_caches_at_home
+
+    _point_caches_at_home()  # reuse the speech model ASR already downloaded
+    device = config.compute_device()
+    return WhisperModel(model_name, device=device, compute_type="float16" if device == "cuda" else "int8")
+
+
+def hear(model, clip, language: str | None, hotwords: str = "", prompt: str | None = None) -> str:
+    """What `model` hears in `clip` (16 kHz float32 samples), tuned for short
+    spans: no carry-over between windows, repetition damped, and at most ~6
+    tokens a second (~3 words a second is already fast speech). language
+    None lets the model pick."""
+    seconds = len(clip) / 16000
+    segments, _ = model.transcribe(
+        clip, language=language, beam_size=5, vad_filter=False, condition_on_previous_text=False,
+        hotwords=hotwords or None, initial_prompt=prompt, temperature=0.0, no_repeat_ngram_size=3,
+        repetition_penalty=1.15, max_new_tokens=min(int(seconds * 6) + 6, 200),  # per 30 s window
+    )
+    return tidy(" ".join(s.text.strip() for s in segments).strip())
+
+
 def second_opinion(audio_path: Path, words: list[dict], spans: list[dict], hotwords: str = "",
                    model_name: str | None = None) -> list[dict]:
     """Re-hear each span with Whisper forced to Swahili; add `alt` when it differs."""
     if not spans:
         return spans
-    import numpy as np  # noqa: F401 — faster-whisper takes a float32 array
-    from faster_whisper import WhisperModel
+    from ..asr.stage import load_audio
 
-    from .. import config
-    from ..asr.stage import _point_caches_at_home, load_audio
-
-    _point_caches_at_home()  # reuse the speech model ASR already downloaded
-    model_name = model_name or os.environ.get("TETCLIPPER_ALT_MODEL", "large-v3-turbo")
+    model = load_model(model_name or os.environ.get("TETCLIPPER_ALT_MODEL", "large-v3-turbo"))
     language = os.environ.get("TETCLIPPER_ALT_LANG", "sw")
-    device = config.compute_device()
-    model = WhisperModel(model_name, device=device, compute_type="float16" if device == "cuda" else "int8")
     audio = load_audio(Path(audio_path))
     rate = 16000
     out = []
     for span in spans:
         a = max(0.0, words[span["from"]]["start"] - PAD_SEC)
         b = words[span["to"]]["end"] + PAD_SEC
-        clip = audio[int(a * rate) : int(b * rate)]
-        segments, _ = model.transcribe(
-            clip, language=language, beam_size=5, vad_filter=False, condition_on_previous_text=False,
-            hotwords=hotwords or None, temperature=0.0, no_repeat_ngram_size=3, repetition_penalty=1.15,
-            max_new_tokens=int((b - a) * 6) + 6,  # ~3 words a second is already fast speech
-        )
-        heard = tidy(" ".join(s.text.strip() for s in segments).strip())
+        heard = hear(model, audio[int(a * rate) : int(b * rate)], language, hotwords)
         current = " ".join(w["text"] for w in words[span["from"] : span["to"] + 1] if not w.get("hidden"))
         item = dict(span)
         if heard and is_alternative(current, heard):

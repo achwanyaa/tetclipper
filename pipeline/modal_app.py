@@ -188,6 +188,24 @@ def second_listen(job_id: str, request: dict) -> list:
     return remote.second_listen(job_id, request)
 
 
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, cpu=8.0, memory=16384)
+def asr_bench(segments: list, models: list, modes: list, hotwords: str = "", prompt: str | None = None) -> list:
+    """The ears test (asr/bench.py): candidate speech models over audio the user checked.
+    Converted models stay on the volume (models/ct2) for the next run."""
+    _in_root()
+    _mark_deps_synced()
+    try:
+        volume.reload()
+    except RuntimeError:
+        pass
+    from tetclipper_pipeline.asr import bench
+
+    try:
+        return bench.run(segments, models, modes, hotwords, prompt)
+    finally:
+        volume.commit()
+
+
 @app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=20 * 60, cpu=8.0, memory=8192)
 def build_spec(job_id: str, clip: int, captions: str | None = None, glossary: dict | None = None) -> dict:
     """Smart camera + spec for one found moment (mapped across clips by `find`)."""

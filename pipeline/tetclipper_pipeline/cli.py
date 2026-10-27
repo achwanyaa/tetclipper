@@ -195,6 +195,12 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return _run_range(job, args.jsonl, args.captions, None, cloud=cloud_client.available())
 
 
+def cmd_asr(args: argparse.Namespace) -> int:
+    from .asr import bench
+
+    return bench.cli(args)
+
+
 def cmd_jobs(args: argparse.Namespace) -> int:
     for job in queue.list_jobs():
         stages = queue.stage_statuses(job.id)
@@ -563,6 +569,19 @@ def main(argv: list[str] | None = None) -> int:
     audio_sub.add_parser("bootstrap", help="fetch a curated CC0 starter pack (music + sfx)")
 
     p_audio.set_defaults(fn=cmd_audio)
+
+    p_asr = sub.add_parser("asr", help="speech models")
+    asr_sub = p_asr.add_subparsers(dest="asr_cmd", required=True)
+    p_bench = asr_sub.add_parser("bench", help="the ears test: score speech models on words you checked by ear")
+    p_bench.add_argument("--history", action="append", metavar="JOB[:CLIP]",
+                         help="spans checked in this clip's edit history (repeatable)")
+    p_bench.add_argument("--gold", action="append", metavar="FILE",
+                         help="JSON list of {id, audio, start, end, ref} segments (repeatable)")
+    p_bench.add_argument("--models", default="turbo,large-v3,paza,jacaranda")
+    p_bench.add_argument("--modes", default="sw,en,auto")
+    p_bench.add_argument("--local", action="store_true", help="run here instead of on the Modal GPU")
+    p_bench.add_argument("--out", default="asr-bench.json")
+    p_asr.set_defaults(fn=cmd_asr)
 
     args = parser.parse_args(argv)
     return args.fn(args)
