@@ -5,5 +5,8 @@
   "buildCommand": "npm run build -w editor",
   "outputDirectory": "editor/dist",
   "redirects": [{ "source": "/", "destination": "/studio/", "permanent": false }],
-  "rewrites": [{ "source": "/studio/:path*", "destination": "/:path*" }]
+  "rewrites": [
+    { "source": "/studio/", "destination": "/index.html" },
+    { "source": "/studio/:path*", "destination": "/:path*" }
+  ]
 }
