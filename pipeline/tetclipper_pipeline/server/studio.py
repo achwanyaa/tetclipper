@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from ..spec import store
-from . import studio_chat
+from . import agent, studio_chat
 from .app import CommandError, _read_json, _SAFE_NAME, command, events, home_dir, stream_pipeline
 
 STUDIO_DIST = Path(os.environ.get("TETCLIPPER_STUDIO_DIST") or Path(__file__).resolve().parents[3] / "studio" / "editor" / "dist")
@@ -137,6 +137,8 @@ def studio_clip(jobId: str, clip: int = 0) -> dict:
         raise CommandError("This clip has no spec yet (still processing?).")
     watcher.watch(job_dir, clip)
     render = _read_json(store.clip_dir(job_dir, clip) / "render.json")
+    engine = agent.engine_label()
+    available = engine["ready"] and (engine["provider"] != "claude-code" or studio_chat.find_claude() is not None)
     return {
         "jobId": job_dir.name,
         "jobDir": str(job_dir),
@@ -145,7 +147,7 @@ def studio_clip(jobId: str, clip: int = 0) -> dict:
         "spec": spec,
         "history": store.history(job_dir, clip),
         "chat": {**studio_chat.history(job_dir, clip), "busy": studio_chat.busy(job_dir, clip),
-                 "available": studio_chat.find_claude() is not None},
+                 "available": available, "engine": engine},
         "render": render,
     }
 
@@ -358,9 +360,16 @@ def studio_chat_send(jobId: str, clip: int, message: str, context: dict | None =
             _publish_spec(job_dir, clip, spec, "claude")
         return problems
 
+    def save_spec(spec: dict, reason: str) -> dict:
+        """API agent edits: validated by store.save (ValueError on problems)."""
+        saved = store.save(job_dir, clip, spec, reason=reason)
+        watcher.note(job_dir, clip)
+        _publish_spec(job_dir, clip, saved, "claude")
+        return saved
+
     try:
         studio_chat.send(job_dir, clip, _title(job_dir), message.strip(), context, events.publish, on_turn_end,
-                         allow_scripts=studio_settings()["allow_scripts"])
+                         allow_scripts=studio_settings()["allow_scripts"], save_spec=save_spec)
     except RuntimeError as err:
         raise CommandError(str(err)) from err
 
@@ -368,3 +377,34 @@ def studio_chat_send(jobId: str, clip: int, message: str, context: dict | None =
 @command
 def studio_chat_reset(jobId: str, clip: int) -> None:
     studio_chat.reset(_job_dir(jobId), clip)
+
+
+# ---------- AI model (admin): provider, model and API key for every user ----------
+
+@command
+def ai_settings_get() -> dict:
+    return agent.public_settings()
+
+
+@command
+def ai_settings_save(provider: str, model: str = "", key: str | None = None, clear_key: bool = False,
+                     base_url: str | None = None, price_in: float | None = None, price_out: float | None = None) -> dict:
+    try:
+        return agent.save_settings(provider, model, key, clear_key, base_url, price_in, price_out)
+    except ValueError as err:
+        raise CommandError(str(err)) from err
+
+
+@command
+def ai_models(provider: str, key: str | None = None, base_url: str | None = None) -> list[str]:
+    try:
+        return agent.list_models(provider, key, base_url)
+    except ValueError as err:
+        raise CommandError(str(err)) from err
+    except ImportError as err:
+        raise CommandError(f"The {provider} client library isn't installed on the server ({err.name}).") from err
+
+
+@command
+def ai_test(provider: str, model: str, key: str | None = None, base_url: str | None = None) -> dict:
+    return agent.test(provider, model, key, base_url)

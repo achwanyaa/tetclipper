@@ -42,10 +42,13 @@ dev = [
 net = [
     "httpx>=0.27",
 ]
-# The web shell (`tetclipper serve`): the browser UI's HTTP API.
+# The web shell (`tetclipper serve`): the browser UI's HTTP API, plus the
+# clients for the Studio chat's API providers (server/agent.py).
 server = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "anthropic>=0.70",
+    "openai>=1.50",
 ]
 pipeline = [
     { include-group = "net" },

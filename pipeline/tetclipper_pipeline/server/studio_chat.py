@@ -233,20 +233,28 @@ def busy(job_dir: Path, clip: int) -> bool:
 
 
 def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
-         publish: Callable[[dict], None], on_turn_end: Callable[[], list[str]], allow_scripts: bool = False) -> None:
-    """Start one chat turn on a thread. `on_turn_end` validates the spec and
-    returns problems (it restores the last good version itself)."""
+         publish: Callable[[dict], None], on_turn_end: Callable[[], list[str]], allow_scripts: bool = False,
+         save_spec: Callable[[dict, str], dict] | None = None) -> None:
+    """Start one chat turn on a thread. With the Claude Code CLI, `on_turn_end`
+    validates the spec and returns problems (it restores the last good version
+    itself). With an API provider (agent.py), every edit goes through `save_spec`."""
+    from . import agent
+
     key = f"{job_dir.name}/{clip}"
-    claude = find_claude()
-    if claude is None:
+    use_api = agent.PROVIDERS[agent.load_settings()["provider"]]["kind"] != "cli"
+    claude = None if use_api else find_claude()
+    if not use_api and claude is None:
         raise RuntimeError("Studio chat needs the Claude Code CLI installed and logged in on this machine.")
+    if use_api and save_spec is None:
+        raise RuntimeError("save_spec is required for API chat.")
     with _lock:
         if key in _busy:
             raise RuntimeError("Claude is still working on the last message.")
         _busy.add(key)
 
     cwd = store.clip_dir(job_dir, clip)
-    write_guide(job_dir, clip, title, allow_scripts)
+    if not use_api:
+        write_guide(job_dir, clip, title, allow_scripts)
     tools = [*ALLOWED_TOOLS, *(SCRIPT_TOOLS if allow_scripts else [])]
     data = history(job_dir, clip)
     data["messages"].append({"role": "user", "text": message, "ts": time.time()})
@@ -299,6 +307,29 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
             error = err.strip() or f"claude exited with code {code}"
         return session_id, replies, error
 
+    def work_api() -> None:
+        replies: list[str] = []
+        error: str | None = None
+        meta: dict = {}
+        try:
+            past = [m for m in data["messages"][:-1] if m.get("role") in ("user", "assistant")][-12:]
+            while past and past[0]["role"] != "user":
+                past.pop(0)
+            replies, error, meta = agent.run_turn(job_dir, clip, title, context_line(ctx) + message, past, emit, save_spec)
+        except Exception as exc:  # noqa: BLE001 — always end the turn
+            error = f"The AI agent failed: {exc}"
+        finally:
+            latest = history(job_dir, clip)
+            if replies:
+                latest["messages"].append({"role": "assistant", "text": "\n\n".join(replies), "ts": time.time(),
+                                           "model": meta.get("model"), "cost": meta.get("cost"), "tokens": meta.get("tokens")})
+            if error:
+                latest["messages"].append({"role": "error", "text": error, "ts": time.time()})
+            _save(job_dir, clip, latest)
+            with _lock:
+                _busy.discard(key)
+            emit("done", error=error, model=meta.get("model"), cost=meta.get("cost"))
+
     def work() -> None:
         session_id = data.get("session_id")
         replies: list[str] = []
@@ -332,4 +363,4 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
                 _busy.discard(key)
             emit("done", error=error)
 
-    threading.Thread(target=work, daemon=True).start()
+    threading.Thread(target=work_api if use_api else work, daemon=True).start()

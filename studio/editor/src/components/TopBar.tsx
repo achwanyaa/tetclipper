@@ -14,12 +14,14 @@ interface Props {
   saving: boolean
   canUndo: boolean
   theme: { toggle: () => void }
+  engine: string | null
+  onAi: () => void
   onHome: () => void
   onOpen: (jobId: string, clip: number) => void
   onUndo: () => void
 }
 
-export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme, onHome, onOpen, onUndo }: Props) {
+export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme, engine, onAi, onHome, onOpen, onUndo }: Props) {
   const [picker, setPicker] = useState(false)
   const job = open ? jobs.find((j) => j.id === open.jobId) : undefined
   const at = step ? STEPS.indexOf(step) : -1
@@ -64,6 +66,11 @@ export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme,
       {open && (
         <button onClick={onUndo} disabled={!canUndo} title="Undo the last change (yours or Claude's)">
           ↶ Undo
+        </button>
+      )}
+      {engine && (
+        <button className="engine-btn" title="AI model for the chat (admin)" onClick={onAi}>
+          ✦ {engine}
         </button>
       )}
       <button className="icon" title={`Switch to ${document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'} theme`} onClick={theme.toggle}>

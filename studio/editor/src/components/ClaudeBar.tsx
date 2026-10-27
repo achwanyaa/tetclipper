@@ -32,6 +32,12 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
           setLive('')
         } else if (ev.kind === 'tool') setNotes((n) => [...n.slice(-3), ev.text ?? ''])
         else if (ev.kind === 'done') {
+          // API providers report the model and what the turn cost.
+          if (ev.model)
+            setMessages((m) => {
+              const i = m.map((x) => x.role).lastIndexOf('assistant')
+              return i < 0 ? m : m.map((x, k) => (k === i ? { ...x, model: ev.model, cost: ev.cost ?? null } : x))
+            })
           if (ev.error) setMessages((m) => [...m, { role: 'error', text: ev.error ?? '' }])
           setBusy(false)
           setLive('')
@@ -78,7 +84,10 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
             <span />
           </span>
         )}
-        <span className="who">Claude Code</span>
+        <span className="who" title="The AI model the admin chose">
+          {last?.model ?? data.chat.engine.label}
+          {!busy && last?.cost != null ? ` · $${last.cost < 0.01 ? last.cost.toFixed(4) : last.cost.toFixed(3)}` : ''}
+        </span>
         {!busy && last?.role === 'assistant' && canUndo && (
           <button className="link" onClick={onUndo}>
             Undo
@@ -89,7 +98,13 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
         </button>
       </div>
 
-      {!data.chat.available && <span className="warn">Claude Code isn't installed on this machine. Install it and run `claude` once to sign in.</span>}
+      {!data.chat.available && (
+        <span className="warn">
+          {data.chat.engine.provider === 'claude-code'
+            ? "Claude Code isn't installed on this machine. Install it and run `claude` once to sign in, or pick an API model under AI model."
+            : `No API key is set for ${data.chat.engine.label}. The admin can add one under AI model.`}
+        </span>
+      )}
 
       <form
         onSubmit={(e) => {

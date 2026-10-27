@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipSpecInput } from '@tetclipper/composition'
-import { invoke, onEvent, type ClipData, type JobSummary } from './api'
+import { invoke, onEvent, type AiSettings as AiSettingsData, type ClipData, type JobSummary } from './api'
+import { AiSettings } from './components/AiSettings'
 import { Canvas } from './components/Canvas'
 import { Home } from './components/Home'
 import { NewClip, type CutArgs, type FindArgs } from './components/NewClip'
@@ -35,6 +36,8 @@ export function App() {
   const [editor, setEditor] = useState<EditorState>({ playhead: null, selection: null })
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [ai, setAi] = useState<AiSettingsData | null>(null)
+  const [aiOpen, setAiOpen] = useState(false)
   const saveTimer = useRef<number | undefined>(undefined)
   const pending = useRef<{ spec: ClipSpecInput; reason: string } | null>(null)
   const openRef = useRef(open)
@@ -64,6 +67,9 @@ export function App() {
   }, [])
 
   useEffect(refreshJobs, [refreshJobs])
+  useEffect(() => {
+    invoke<AiSettingsData>('ai_settings_get').then(setAi).catch(() => undefined)
+  }, [])
   useEffect(() => {
     if (open) loadClip(open.jobId, open.clip)
     else {
@@ -181,10 +187,22 @@ export function App() {
         saving={saving}
         canUndo={(data?.history.length ?? 0) > 1}
         theme={theme}
+        engine={ai ? (ai.providers.find((p) => p.id === ai.provider)?.kind === 'cli' ? 'Claude Code' : ai.model) : null}
+        onAi={() => setAiOpen(true)}
         onHome={goHome}
         onOpen={(jobId, clip) => setOpen({ jobId, clip })}
         onUndo={undo}
       />
+
+      {aiOpen && (
+        <AiSettings
+          onClose={() => setAiOpen(false)}
+          onSaved={(s) => {
+            setAi(s)
+            if (open) loadClip(open.jobId, open.clip) // the chat shows the new engine
+          }}
+        />
+      )}
 
       {error && (
         <div className="toast" onClick={() => setError(null)} title="Dismiss">

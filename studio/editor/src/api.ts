@@ -71,6 +71,16 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'error'
   text: string
   ts?: number
+  model?: string | null
+  cost?: number | null
+}
+
+/** Which AI answers in the Studio chat (set by the admin under AI model). */
+export interface Engine {
+  provider: string
+  model: string
+  label: string
+  ready: boolean
 }
 
 export interface ClipData {
@@ -80,8 +90,28 @@ export interface ClipData {
   title: string
   spec: ClipSpecInput
   history: HistoryEntry[]
-  chat: { messages: ChatMessage[]; busy: boolean; available: boolean }
+  chat: { messages: ChatMessage[]; busy: boolean; available: boolean; engine: Engine }
   render: { output: string; spec_version: number | null; rendered_at: string } | null
+}
+
+export interface AiProvider {
+  id: string
+  label: string
+  kind: 'cli' | 'anthropic' | 'openai'
+  note: string | null
+  key_url: string | null
+  default: string
+  models: string[]
+  key: string | null // masked hint of the saved key
+}
+
+export interface AiSettings {
+  provider: string
+  model: string
+  base_url: string
+  prices: Record<string, { in: number | null; out: number | null }>
+  known_prices: Record<string, [number, number]>
+  providers: AiProvider[]
 }
 
 export interface JobSummary {
@@ -97,7 +127,7 @@ export type ServerEvent =
   | { event: 'result'; ok: boolean; job_id?: string; clip?: number; error?: string; output?: unknown }
   | { event: 'exited'; code: number }
   | { event: 'spec'; job_id: string; clip: number; spec: ClipSpecInput; source: string; history: HistoryEntry[] }
-  | { event: 'studio-chat'; job_id: string; clip: number; kind: 'text' | 'delta' | 'tool' | 'done'; text?: string; error?: string | null }
+  | { event: 'studio-chat'; job_id: string; clip: number; kind: 'text' | 'delta' | 'tool' | 'done'; text?: string; error?: string | null; model?: string | null; cost?: number | null }
 
 export function fmt(t: number): string {
   const m = Math.floor(t / 60)

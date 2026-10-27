@@ -363,6 +363,11 @@ Code: `studio/editor/src/components/Chat.tsx`
 - In the sidebar, a clip that is saved to Drive shows a small Drive mark next to its rendered dot.
 
 ### 5.5 Chat: model switch and cost
+- **AI model window (admin, built):** the "✦ model" button in the top bar opens it. The admin picks the
+  provider (Claude Code on this PC, Claude API, DeepSeek, NVIDIA, or any OpenAI-compatible endpoint),
+  loads that provider's live model list, pastes the API key, tests it and saves. It applies to every user;
+  keys stay on the server (`~/.tetclipper/ai.json`) and only a masked hint reaches the browser. Code:
+  `pipeline/tetclipper_pipeline/server/agent.py`, `studio/editor/src/components/AiSettings.tsx`.
 - A compact switch in the chat header:
   - **Haiku 5.5**: fast and cheap. The default, for everyday edits.
   - **Sonnet 5.5**: smarter, about 20× the cost. For tricky multi-step edits.
