@@ -41,6 +41,7 @@ RATE = 16000
 CONTEXT_WORDS = 2  # either side of a retyped word: one word alone is too short to hear
 MIN_SEC = 4.0  # shortest piece worth hearing; spans grow to this many seconds of whole words
 MAX_GAP_SEC = 1.2  # …but not across a longer pause
+FIRST_PASS_MIN_SEC = 10.0  # pieces this long are heard the way the first pass hears a sermon
 MODES = ("sw", "en", "auto")
 KINDS = ("retyped", "swahili", "checked", "gold")  # how the user checked a span, most telling first
 
@@ -234,34 +235,65 @@ def _log(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
+def _first_pass(ref: str, model, hotwords: str, prompt: str | None):
+    """The first pass's own pipeline (asr/stage.py) around an already-loaded
+    model: whisperX with voice detection, the hint prompt and word list, and
+    no repeat guards. Those guards suit 2-second spans but mangle a sermon's
+    real repetition ("Kuna vitu tunataka sana" twice came back as
+    "vitutunаtaka", with a Cyrillic а to dodge the rule)."""
+    from ..compat import patch_speechbrain_lazy_imports
+
+    patch_speechbrain_lazy_imports()
+    import whisperx
+
+    device = config.compute_device()
+    return whisperx.load_model(ref, device, compute_type="float16" if device == "cuda" else "int8",
+                               vad_method="silero", asr_options={"initial_prompt": prompt, "hotwords": hotwords or None},
+                               model=model)
+
+
 def run(segments: list[dict], models: list[str], modes: list[str], hotwords: str = "",
         prompt: str | None = None) -> list[dict]:
-    """Every model × mode over every segment (with `pcm`): one row per hearing."""
+    """Every model × mode over every segment (with `pcm`): one row per hearing.
+    Pieces of FIRST_PASS_MIN_SEC or more are heard the way the first pass
+    hears a sermon; shorter spans the way the second listen hears them."""
     import numpy as np
 
     rows: list[dict] = []
     for cid in models:
         t0 = time.monotonic()
         try:
-            model = doubts.load_model(model_ref(cid))
+            ref = model_ref(cid)
+            model = doubts.load_model(ref)
+            pipeline = _first_pass(ref, model, hotwords, prompt) if any(
+                s["end"] - s["start"] >= FIRST_PASS_MIN_SEC for s in segments) else None
         except Exception as err:  # noqa: BLE001 — one model failing mustn't sink the test
             _log(f"{cid}: could not load ({err})")
             rows.append({"model": cid, "mode": None, "id": None, "text": "", "secs": 0.0, "error": f"could not load: {err}"})
             continue
         _log(f"{cid}: loaded in {time.monotonic() - t0:.0f}s")
         for mode in modes:
+            language = None if mode == "auto" else mode
             for seg in segments:
                 clip = np.frombuffer(seg["pcm"], np.int16).astype(np.float32) / 32768.0
+                long = seg["end"] - seg["start"] >= FIRST_PASS_MIN_SEC
                 t1 = time.monotonic()
                 try:
-                    text, error = doubts.hear(model, clip, None if mode == "auto" else mode, hotwords,
-                                              None if mode == "sw" else prompt, CANDIDATES[cid].timestamps), None
+                    if long:
+                        if language is None:
+                            pipeline.tokenizer = None  # whisperX keeps the last language; detect afresh
+                        out = pipeline.transcribe(clip, batch_size=8, language=language)
+                        text = " ".join(s["text"].strip() for s in out["segments"]).strip()
+                    else:
+                        text = doubts.hear(model, clip, language, hotwords, None if mode == "sw" else prompt,
+                                           CANDIDATES[cid].timestamps)
+                    error = None
                 except Exception as err:  # noqa: BLE001 — e.g. a language code faster-whisper doesn't know
                     text, error = "", str(err)
-                rows.append({"model": cid, "mode": mode, "id": seg["id"], "text": text,
+                rows.append({"model": cid, "mode": mode, "id": seg["id"], "text": text, "style": "first pass" if long else "span",
                              "secs": round(time.monotonic() - t1, 3), "error": error})
             _log(f"{cid} {mode}: done")
-        del model
+        del pipeline, model
         gc.collect()
     return rows
 
