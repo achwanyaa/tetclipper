@@ -152,6 +152,32 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
   useEffect(() => {
     if (isAdmin) invoke<AiSettingsData>('ai_settings_get').then(setAi).catch(() => undefined)
   }, [isAdmin])
+
+  // While anything runs, re-read the job list every 5 s: progress lives on the
+  // server, so this works even when a live event never reaches this browser.
+  const anyRunning = jobs.some((j) => j.progress?.state === 'running') || ((run?.kind === 'cut' || run?.kind === 'find') && !run.error)
+  useEffect(() => {
+    if (!anyRunning) return
+    const timer = window.setInterval(refreshJobs, 5000)
+    return () => window.clearInterval(timer)
+  }, [anyRunning, refreshJobs])
+
+  // A cut or find we started finished without its live "result" event: clear
+  // the card and open the clip, as the event would have.
+  const watched = useRef(new Set<string>())
+  useEffect(() => {
+    const r = runRef.current
+    if (!r || r.error || (r.kind !== 'cut' && r.kind !== 'find')) {
+      watched.current.clear()
+      return
+    }
+    for (const j of jobs) if (j.progress?.state === 'running' || j.id === r.jobId) watched.current.add(j.id)
+    const finished = jobs.find((j) => watched.current.has(j.id) && (j.progress?.state === 'done' || j.progress?.state === 'failed'))
+    if (!finished) return
+    watched.current.clear()
+    setRun(null)
+    if (finished.progress?.state === 'done' && finished.clips.length && !openRef.current) setOpen({ jobId: finished.id, clip: 0 })
+  }, [jobs])
   useEffect(() => {
     if (open) loadClip(open.jobId, open.clip)
     else {
@@ -328,6 +354,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
           onNew={() => setScreen('new')}
           onFind={(a) => startJob('find', a)}
           onDismissRun={() => setRun(null)}
+          onDismissJob={(jobId) => invoke('studio_job_dismiss', { jobId }).then(refreshJobs).catch((e) => setError(String(e.message ?? e)))}
           onRetry={refreshJobs}
         />
       )}

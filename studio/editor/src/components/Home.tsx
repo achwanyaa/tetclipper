@@ -16,14 +16,44 @@ interface Props {
   onNew: () => void
   onFind: (args: FindArgs) => void
   onDismissRun: () => void
+  onDismissJob: (jobId: string) => void
   onRetry: () => void
 }
 
+/** Until the download finishes the job has no title yet, only its id. */
+const displayTitle = (job: JobSummary) => (job.title && job.title !== job.id ? job.title : 'New video')
+
+function RunCard({ title, fraction, message, error, onDismiss }: { title: string; fraction: number; message: string; error: string | null; onDismiss: () => void }) {
+  return (
+    <div className={`card run-card ${error ? 'failed' : ''}`}>
+      <div className="top">
+        <b>{title}</b>
+        {error ? (
+          <button className="link small muted" onClick={onDismiss}>
+            Dismiss
+          </button>
+        ) : (
+          <span className="small muted mono">{Math.round(fraction * 100)}%</span>
+        )}
+      </div>
+      <div className="progress">
+        <div style={{ width: `${Math.round((error ? 1 : fraction) * 100)}%`, background: error ? 'var(--dg)' : undefined }} />
+      </div>
+      <span style={{ fontSize: 13 }}>{error ? <b style={{ color: 'var(--dg)' }}>{error}</b> : message}</span>
+      {!error && <span className="small muted">You can close this tab. It keeps going on the server.</span>}
+    </div>
+  )
+}
+
 /** All clips: running jobs on top, then every clip grouped by the video it came from. */
-export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun, onRetry }: Props) {
+export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun, onDismissJob, onRetry }: Props) {
   const clipCount = jobs.reduce((n, j) => n + j.clips.length, 0)
-  const videos = new Set(jobs.map((j) => j.title)).size
-  const busy = !!run && !run.error
+  const videos = new Set(jobs.filter((j) => j.clips.length).map((j) => j.title)).size
+  // Running and failed jobs as the server sees them; the local card only covers
+  // the moment before the server has the job, and renders (not jobs).
+  const serverRuns = jobs.filter((j) => j.progress && (j.progress.state === 'running' || j.progress.state === 'failed'))
+  const showLocal = !!run && (run.kind === 'render' || !jobs.some((j) => j.id === run.jobId || j.progress?.state === 'running'))
+  const busy = (!!run && !run.error) || serverRuns.some((j) => j.progress?.state === 'running')
 
   return (
     <div className="home">
@@ -39,27 +69,29 @@ export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun
         </button>
       </div>
 
-      {run && (
+      {(serverRuns.length > 0 || showLocal) && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <span className="section-title">In progress</span>
           <div className="runs">
-            <div className={`card run-card ${run.error ? 'failed' : ''}`}>
-              <div className="top">
-                <b>{run.kind === 'find' ? 'Finding moments' : run.kind === 'cut' ? 'Cutting a clip' : `Rendering clip ${(run.clip ?? 0) + 1}`}</b>
-                {run.error ? (
-                  <button className="link small muted" onClick={onDismissRun}>
-                    Dismiss
-                  </button>
-                ) : (
-                  <span className="small muted mono">{Math.round(run.fraction * 100)}%</span>
-                )}
-              </div>
-              <div className="progress">
-                <div style={{ width: `${Math.round((run.error ? 1 : run.fraction) * 100)}%`, background: run.error ? 'var(--dg)' : undefined }} />
-              </div>
-              <span style={{ fontSize: 13 }}>{run.error ? <b style={{ color: 'var(--dg)' }}>{run.error}</b> : run.message}</span>
-              {!run.error && <span className="small muted">You can close this tab. It keeps going on the server.</span>}
-            </div>
+            {serverRuns.map((job) => (
+              <RunCard
+                key={job.id}
+                title={`${job.progress!.label ?? 'Working'} · ${displayTitle(job)}`}
+                fraction={job.progress!.fraction}
+                message={job.progress!.message}
+                error={job.progress!.state === 'failed' ? job.progress!.error || 'The job failed.' : null}
+                onDismiss={() => onDismissJob(job.id)}
+              />
+            ))}
+            {showLocal && run && (
+              <RunCard
+                title={run.kind === 'find' ? 'Finding moments' : run.kind === 'cut' ? 'Cutting a clip' : `Rendering clip ${(run.clip ?? 0) + 1}`}
+                fraction={run.fraction}
+                message={run.message}
+                error={run.error ?? null}
+                onDismiss={onDismissRun}
+              />
+            )}
           </div>
         </div>
       )}
@@ -86,14 +118,19 @@ export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun
         </div>
       )}
 
-      {jobs.map((job) => (
+      {jobs.filter((j) => j.clips.length > 0 || !serverRuns.includes(j)).map((job) => (
         <div key={job.id} className="video-group">
           <div className="head">
-            <span className="section-title">{job.title}</span>
+            <span className="section-title">{displayTitle(job)}</span>
             <span className="muted" style={{ fontSize: 13 }}>
               {job.section ? `${fmt(job.section[0])} – ${fmt(job.section[1])} · ` : ''}
               {job.clips.length} {job.clips.length === 1 ? 'clip' : 'clips'}
             </span>
+            {job.height != null && job.height < 720 && (
+              <span className="tag wn" title="The video in Drive is low resolution, so vertical clips cut from it look soft. Upload a sharper original to Drive for better clips.">
+                {job.height}p source: clips will look soft
+              </span>
+            )}
             <span className="spacer" />
             <button
               className="link"

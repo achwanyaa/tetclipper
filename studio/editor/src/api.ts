@@ -154,10 +154,22 @@ export interface AiSettings {
   providers: AiProvider[]
 }
 
+/** A job's latest step, kept on the server (survives reloads and missed events). */
+export interface JobProgress {
+  state: 'running' | 'done' | 'failed' | 'dismissed'
+  fraction: number
+  message: string
+  label: string | null // "Cutting a clip" / "Finding moments"
+  error?: string | null
+  updated?: number
+}
+
 export interface JobSummary {
   id: string
   title: string
   section: [number, number] | null
+  progress?: JobProgress | null
+  height?: number | null // the downloaded source video's height
   clips: { clip: number; rendered: boolean; style: string | null; score: number | null; summary: string | null }[]
 }
 

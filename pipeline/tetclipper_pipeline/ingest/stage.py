@@ -79,7 +79,7 @@ class IngestStage(Stage):
             title = meta.title
             media_path = ctx.job_dir / "media.mp4"
             if not media_path.exists():
-                ytdlp.download(job.source, media_path, prog, section=section)
+                ytdlp.download(job.source, media_path, prog, section=section, fmt=ytdlp.pick_format(meta, prog))
         elif section:
             src = Path(job.source).expanduser().resolve()
             if not src.exists():

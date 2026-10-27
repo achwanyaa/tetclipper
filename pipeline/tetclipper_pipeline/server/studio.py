@@ -100,6 +100,30 @@ watcher = _Watcher()
 
 # ---------- commands ----------
 
+STALE_SEC = 30 * 60  # a running job silent this long was cut off (server restart)
+
+
+def _job_progress(job_dir: Path) -> dict | None:
+    """The job's last step (server/app.py _JobProgress), or None for jobs from
+    before progress files existed."""
+    progress = _read_json(job_dir / "progress.json")
+    if not isinstance(progress, dict):
+        return None
+    if progress.get("state") == "running" and time.time() - float(progress.get("updated") or 0) > STALE_SEC:
+        progress.update(state="failed", error="This job stopped partway (the server restarted). Start it again.")
+    return progress
+
+
+@command
+def studio_job_dismiss(jobId: str) -> None:
+    """Hide a failed job's card from In progress."""
+    job_dir = _job_dir(jobId)
+    progress = _read_json(job_dir / "progress.json")
+    if isinstance(progress, dict):
+        progress["state"] = "dismissed"
+        (job_dir / "progress.json").write_text(json.dumps(progress), encoding="utf-8")
+
+
 @command
 def studio_jobs() -> list[dict]:
     """Every job with Studio clips, newest first."""
@@ -108,13 +132,18 @@ def studio_jobs() -> list[dict]:
     for job_dir in sorted(root.iterdir() if root.is_dir() else [], reverse=True):
         clips = store.list_clips(job_dir)
         settings = _read_json(job_dir / "settings.json") or {}
-        if not clips and not settings.get("section"):
+        progress = _job_progress(job_dir)
+        active = progress is not None and progress["state"] in ("running", "failed")
+        if not clips and not settings.get("section") and not active:
             continue
         scored = ((_read_json(job_dir / "score.json") or {}).get("data") or {}).get("clips") or []
+        probe = ((_read_json(job_dir / "ingest.json") or {}).get("data") or {}).get("probe") or {}
         out.append({
             "id": job_dir.name,
             "title": _title(job_dir),
             "section": settings.get("section"),
+            "progress": progress,
+            "height": probe.get("height"),
             "clips": [
                 {
                     "clip": c,

@@ -13,9 +13,11 @@ the `tetclipper-home` Volume, mounted as TETCLIPPER_HOME. The web endpoint
 serves the built Studio editor (studio/editor/dist) next to the API. Studio
 chat needs the Claude Code CLI, so it only works in a local `tetclipper serve`.
 
-The container stays up while a browser tab is open (its SSE stream is an
-open request) plus SCALEDOWN seconds, and jobs checkpoint after every stage,
-so a job cut off by a scale-down resumes from where it stopped.
+There is exactly one web container (max_containers=1): live events, chat
+state and the spec watcher live in its memory, so a second container would
+miss them. It stays up while a browser tab is open (its SSE stream is an open
+request) or a job is running (server/app.py pings TETCLIPPER_PUBLIC_URL), plus
+SCALEDOWN seconds; jobs also checkpoint after every stage.
 """
 from __future__ import annotations
 
@@ -45,6 +47,8 @@ image = (
         # The web shell spawns this instead of `uv run tetclipper` (no uv in the image).
         "TETCLIPPER_CLI": "python -m tetclipper_pipeline.cli",
         "TETCLIPPER_STUDIO_DIST": "/root/studio-dist",
+        # Its own address: pinged while a job runs so Modal doesn't scale it down.
+        "TETCLIPPER_PUBLIC_URL": "https://achwanyatours--tetclipper-web.us-east.modal.run",
         # uv_sync also installs a frozen copy of the package into site-packages;
         # the live mount at /root must win, for the server and its CLI subprocesses.
         "PYTHONPATH": "/root",
@@ -109,6 +113,7 @@ def _commit_forever(every: float = 30.0) -> None:
     secrets=[modal.Secret.from_name("tetclipper-web"), modal.Secret.from_name("tetclipper-supabase")],
     timeout=60 * 60,
     scaledown_window=SCALEDOWN,
+    max_containers=1,
     cpu=8.0,
     memory=16384,
 )

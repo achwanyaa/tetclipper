@@ -160,32 +160,119 @@ def stream_pipeline(args: list[str]) -> None:
     works in the caller's workspace."""
     ws = config.WORKSPACE.get()
     env = {**os.environ, "TETCLIPPER_WORKSPACE": str(ws)} if ws else None
+    label = "Finding moments" if "find" in args else "Cutting a clip" if "cut" in args else None
 
     def _run() -> None:
+        progress = _JobProgress(label)
+        _job_started()
         try:
-            child = subprocess.Popen(
-                cli_command(["--jsonl", *args]), stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
-                errors="replace", creationflags=_NO_WINDOW, env=env,
-            )
-        except OSError as err:
-            events.publish({"event": "result", "ok": False, "error": f"could not start pipeline: {err}"}, ws)
-            return
-        saw_result = False
-        assert child.stdout is not None
-        for line in child.stdout:
             try:
-                value = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(value, dict):
-                saw_result |= value.get("event") == "result"
-                events.publish(value, ws)
-        code = child.wait()
-        if code != 0 and not saw_result:
-            events.publish({"event": "exited", "code": code}, ws)
+                child = subprocess.Popen(
+                    cli_command(["--jsonl", *args]), stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+                    errors="replace", creationflags=_NO_WINDOW, env=env,
+                )
+            except OSError as err:
+                events.publish({"event": "result", "ok": False, "error": f"could not start pipeline: {err}"}, ws)
+                return
+            saw_result = False
+            assert child.stdout is not None
+            for line in child.stdout:
+                try:
+                    value = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(value, dict):
+                    saw_result |= value.get("event") == "result"
+                    progress.track(value)
+                    events.publish(value, ws)
+            code = child.wait()
+            if code != 0 and not saw_result:
+                progress.track({"event": "exited", "code": code})
+                events.publish({"event": "exited", "code": code}, ws)
+        finally:
+            _job_ended()
 
     threading.Thread(target=contextvars.copy_context().run, args=(_run,), daemon=True).start()
+
+
+class _JobProgress:
+    """<job dir>/progress.json: the job's latest step. The clip list reads it,
+    so a running job shows up even when its live events never reached this
+    browser (a reload, another device)."""
+
+    def __init__(self, label: str | None) -> None:
+        self.path: Path | None = None
+        self.state: dict = {"state": "running", "fraction": 0.0, "message": "Starting…", "label": label}
+        self.written = 0.0
+
+    def track(self, event: dict) -> None:
+        kind = event.get("event")
+        if kind == "job" and event.get("dir") and self.path is None:
+            self.path = Path(event["dir"]) / "progress.json"
+            self._write(force=True)
+        elif kind == "progress":
+            if isinstance(event.get("fraction"), (int, float)) and event["fraction"] >= 0:
+                self.state["fraction"] = float(event["fraction"])
+            self.state["message"] = event.get("message") or self.state["message"]
+            self._write()
+        elif kind == "result":
+            ok = bool(event.get("ok"))
+            self.state.update(state="done" if ok else "failed", fraction=1.0, error=None if ok else event.get("error"))
+            self._write(force=True)
+        elif kind == "exited":
+            self.state.update(state="failed", error=f"The job stopped unexpectedly (code {event.get('code')}).")
+            self._write(force=True)
+
+    def _write(self, force: bool = False) -> None:
+        now = time.time()
+        if self.path is None or (not force and now - self.written < 1.0):
+            return
+        self.written = now
+        try:
+            self.path.write_text(json.dumps({**self.state, "updated": now}), encoding="utf-8")
+        except OSError:
+            pass
+
+
+# Modal scales the web container down 15 min after its last request, and a
+# running pipeline isn't a request. While one runs, ask ourselves for
+# something cheap every 4 minutes (TETCLIPPER_PUBLIC_URL; unset on the desktop).
+_running = 0
+_running_lock = threading.Lock()
+_pinger: threading.Thread | None = None
+
+
+def _job_started() -> None:
+    global _running, _pinger
+    with _running_lock:
+        _running += 1
+        if os.environ.get("TETCLIPPER_PUBLIC_URL") and _pinger is None:
+            _pinger = threading.Thread(target=_keep_alive, daemon=True)
+            _pinger.start()
+
+
+def _job_ended() -> None:
+    global _running
+    with _running_lock:
+        _running -= 1
+
+
+def _keep_alive() -> None:
+    global _pinger
+    import httpx
+
+    url = os.environ.get("TETCLIPPER_PUBLIC_URL", "").rstrip("/")
+    while True:
+        time.sleep(240)
+        with _running_lock:
+            if _running <= 0:
+                _pinger = None
+                return
+        try:
+            httpx.get(f"{url}/api/auth-config", timeout=30)
+        except httpx.HTTPError:
+            pass
 
 
 # ---------- commands (POST /api/cmd/<name>; Studio's are in server/studio.py) ----------

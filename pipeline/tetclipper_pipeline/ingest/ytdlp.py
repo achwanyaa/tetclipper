@@ -256,8 +256,57 @@ DOWNLOAD_FORMAT = (
 _PCT_RE = re.compile(r"\[download\]\s+([\d.]+)%")
 
 
+def _probe_height(url: str, headers: dict) -> int | None:
+    """Height of a remote video, read from its header (a few seconds)."""
+    from ..render import ffmpeg_bin
+
+    header_text = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
+    try:
+        out = subprocess.run(
+            [ffmpeg_bin.ffprobe(), "-v", "error", *(["-headers", header_text] if header_text else []),
+             "-select_streams", "v:0", "-show_entries", "stream=height", "-of", "csv=p=0", url],
+            capture_output=True, text=True, timeout=40,
+        )
+        return int(out.stdout.strip().splitlines()[0])
+    except (subprocess.TimeoutExpired, OSError, ValueError, IndexError):
+        return None
+
+
+def pick_format(meta: UrlMeta, progress: ProgressFn) -> str:
+    """Which format to download. Google Drive's own copies can top out at 360p
+    (new uploads, some files) while the original upload is sharper; yt-dlp
+    lists the original as `source` with no height, so the usual rule never
+    picks it. Use it only when a probe shows it's taller: forcing the original
+    on every file can hang (seen on a 1080p upload Drive already serves)."""
+    data = meta.raw or {}
+    if "GoogleDrive" not in (data.get("extractor_key"), data.get("extractor")):
+        return DOWNLOAD_FORMAT
+    formats = data.get("formats") or []
+    best = max((f.get("height") or 0 for f in formats if f.get("format_id") != "source"), default=0)
+    source = next((f for f in formats if f.get("format_id") == "source" and f.get("url")), None)
+    if best >= 720 or source is None:
+        return DOWNLOAD_FORMAT
+    progress(0.12, "Checking the original's quality…")
+    height = _probe_height(source["url"], source.get("http_headers") or {})
+    return "source" if height and height > best else DOWNLOAD_FORMAT
+
+
 def download(url: str, out_path: Path, progress: ProgressFn,
-             section: tuple[float, float] | None = None) -> None:
+             section: tuple[float, float] | None = None, fmt: str | None = None) -> None:
+    if fmt and fmt != DOWNLOAD_FORMAT:
+        try:
+            _download(url, out_path, progress, section, fmt)
+            return
+        except YtDlpError:
+            # The original didn't come down: fall back to the site's own copy.
+            for leftover in out_path.parent.glob(out_path.name + "*"):
+                leftover.unlink(missing_ok=True)
+            progress(0.15, "Using Drive's copy instead…")
+    _download(url, out_path, progress, section, DOWNLOAD_FORMAT)
+
+
+def _download(url: str, out_path: Path, progress: ProgressFn,
+              section: tuple[float, float] | None, fmt: str) -> None:
     bin_path = ensure_ytdlp(progress)
     # The ffmpeg tetclipper resolved, not whatever a login shell's PATH holds:
     # a desktop launch has neither Homebrew nor the fetched static build on it.
@@ -265,7 +314,7 @@ def download(url: str, out_path: Path, progress: ProgressFn,
     if not os.path.isabs(ffmpeg):
         ffmpeg = shutil.which(ffmpeg)
     args = [
-        "-f", DOWNLOAD_FORMAT,
+        "-f", fmt,
         "--merge-output-format", "mp4",
         "--no-playlist",
         "--no-warnings",
