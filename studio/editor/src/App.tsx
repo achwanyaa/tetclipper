@@ -317,7 +317,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
           </div>
         )
       ) : screen === 'new' ? (
-        <NewClip busy={jobBusy} onCut={(a) => startJob('cut', a)} onFind={(a) => startJob('find', a)} />
+        <NewClip busy={jobBusy} online={!!account} onCut={(a) => startJob('cut', a)} onFind={(a) => startJob('find', a)} />
       ) : (
         <Home
           jobs={jobs}

@@ -24,8 +24,19 @@ export interface CutArgs {
 
 interface Props {
   busy: boolean
+  online: boolean // the hosted app: videos come from Google Drive
   onCut: (args: CutArgs) => void
   onFind: (args: FindArgs) => void
+}
+
+/** What's wrong with the pasted source before anything runs, if anything. */
+function sourceProblem(source: string, online: boolean): string | null {
+  const s = source.trim()
+  if (!s) return null
+  if (/drive\.google\.com\/drive\/(u\/\d+\/)?folders\//.test(s)) return "That's a folder link. Open the video itself in Drive and copy its link."
+  if (online && /(youtube\.com|youtu\.be)\//.test(s)) return 'YouTube links only work in the desktop app. Put the video in Google Drive and paste its link here.'
+  if (online && !/^https?:\/\//.test(s)) return 'Paste the Google Drive link to the video.'
+  return null
 }
 
 const LANGUAGES: [string, string][] = [
@@ -35,7 +46,7 @@ const LANGUAGES: [string, string][] = [
 ]
 
 /** Step 1 · Video: pick the source and the range (or ask Claude to find moments). */
-export function NewClip({ busy, onCut, onFind }: Props) {
+export function NewClip({ busy, online, onCut, onFind }: Props) {
   const [source, setSource] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -58,10 +69,12 @@ export function NewClip({ busy, onCut, onFind }: Props) {
   const length = end - start
   const rangeGiven = from.trim() !== '' || to.trim() !== ''
   const rangeOk = Number.isFinite(start) && Number.isFinite(end)
+  const problem = sourceProblem(source, online)
   const valid =
-    mode === 'range'
+    !problem &&
+    (mode === 'range'
       ? !!source.trim() && rangeOk && length >= 3 && length <= 600
-      : !!source.trim() && (!rangeGiven || (rangeOk && length >= 60))
+      : !!source.trim() && (!rangeGiven || (rangeOk && length >= 60)))
   const useCloud = cloudOk && cloud
 
   const submit = () => {
@@ -75,15 +88,25 @@ export function NewClip({ busy, onCut, onFind }: Props) {
   return (
     <div className="make">
       <div className="make-main">
-        <div className="card source-card">
-          <div className="ph" />
-          <input
-            autoFocus
-            placeholder="Paste a YouTube link or a video file path"
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
-          />
+        <div className="card source-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+          <div className="row" style={{ flexWrap: 'nowrap', gap: 12 }}>
+            <div className="ph" />
+            <input
+              autoFocus
+              placeholder={online ? 'Paste the Google Drive link to the video' : 'Paste a Google Drive or YouTube link, or a video file path'}
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+              style={{ flex: 1 }}
+            />
+          </div>
+          {problem ? (
+            <span className="small hint">{problem}</span>
+          ) : (
+            <span className="small muted">
+              In Google Drive: right-click the video → Share → General access → “Anyone with the link” → Copy link. Only the part you pick is downloaded.
+            </span>
+          )}
         </div>
         <div className="make-stage">
           <div className="frame">

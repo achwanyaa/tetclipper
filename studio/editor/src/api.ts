@@ -41,6 +41,8 @@ export async function invoke<T = unknown>(name: string, args: Record<string, unk
 /** How this server signs people in: none (desktop app), supabase (online) or token. */
 export async function authConfig(): Promise<{ mode: 'none' | 'supabase' | 'token' }> {
   const res = await fetch(`${API}/api/auth-config`)
+  // A server from before online sign-in has no such route: it needs no sign-in.
+  if (res.status === 404 && API === '') return { mode: 'none' }
   if (!res.ok) throw new Error(`The tetclipper server didn't answer (${res.status}).`)
   return res.json()
 }

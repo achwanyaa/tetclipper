@@ -199,13 +199,27 @@ def _pick_playlist_entry(data: dict) -> dict:
     return merged
 
 
+DRIVE_NOT_SHARED = (
+    "Couldn't open this Google Drive video. In Drive, open the video, click Share, set "
+    "General access to “Anyone with the link”, then copy the link and try again."
+)
+
+
 def fetch_meta(url: str, progress: ProgressFn) -> UrlMeta:
+    if "drive.google.com" in url and "/folders/" in url:
+        raise YtDlpError("That's a Google Drive folder link. Open the video itself and copy its link.")
     bin_path = ensure_ytdlp(progress)
 
     def _go() -> str:
         return _run(bin_path, ["-J", "--no-playlist", "--no-warnings", url])
 
-    out = _with_self_update_retry(bin_path, progress, _go)
+    try:
+        out = _with_self_update_retry(bin_path, progress, _go)
+    except YtDlpError as err:
+        # A Drive file that isn't shared looks like a 404 (or a sign-in page).
+        if "drive.google.com" in url and ("404" in str(err) or is_auth_error(str(err))):
+            raise YtDlpError(DRIVE_NOT_SHARED) from err
+        raise
     data = json.loads(out)
     if data.get("_type") == "playlist":
         data = _pick_playlist_entry(data)
