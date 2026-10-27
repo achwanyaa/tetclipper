@@ -81,6 +81,11 @@ export function fileUrl(path: string, download = false): string {
   return withMedia(`${API}/files?path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`)
 }
 
+/** A frame of one clip as it will look (made on the server; `version` changes with the clip). */
+export function thumbUrl(jobId: string, clip: number, version: number): string {
+  return withMedia(`${API}/api/thumb?job=${encodeURIComponent(jobId)}&clip=${clip}&v=${version}`)
+}
+
 const isUrl = (s: string) => /^(https?:|data:|blob:|\/)/.test(s)
 
 /** A path from the spec (relative to the job dir) → a URL the browser can load. */
@@ -170,7 +175,7 @@ export interface JobSummary {
   section: [number, number] | null
   progress?: JobProgress | null
   res?: number | null // the source video's short side: the p in 480p, landscape or vertical
-  clips: { clip: number; rendered: boolean; style: string | null; score: number | null; summary: string | null }[]
+  clips: { clip: number; rendered: boolean; thumb?: number; style: string | null; score: number | null; summary: string | null }[]
 }
 
 export type ServerEvent =

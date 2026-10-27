@@ -450,7 +450,7 @@ async def _require_token(request: Request, call_next):
         token = header[7:] if header.lower().startswith("bearer ") else request.query_params.get("access_token", "")
         if token.startswith("mt."):
             # Media tokens only open the read-only routes that can't send headers.
-            user = _media_user(token) if path in ("/files", "/api/events") else None
+            user = _media_user(token) if path in ("/files", "/api/events", "/api/thumb") else None
         else:
             user = await _supabase_user(token) if token else None
         if not user or not _SAFE_ID.match(user["id"]):
@@ -594,6 +594,19 @@ async def upload(request: Request, name: str) -> dict:
 
 
 from . import studio as _studio  # noqa: E402 — registers the studio_* commands
+
+
+@app.get("/api/thumb")
+async def get_thumb(job: str, clip: int, v: str = "") -> FileResponse:
+    """A clip card's image (studio.thumbnail). `v` changes with the clip, so it caches."""
+    try:
+        path = await asyncio.to_thread(_studio.thumbnail, job, clip)
+    except CommandError:
+        path = None
+    if path is None:
+        raise HTTPException(404)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
+
 
 if _studio.STUDIO_DIST.exists():
     app.mount("/studio", StaticFiles(directory=_studio.STUDIO_DIST, html=True), name="studio")

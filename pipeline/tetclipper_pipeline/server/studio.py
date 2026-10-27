@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -22,6 +23,79 @@ from .app import CommandError, _read_json, _SAFE_NAME, command, events, home_dir
 STUDIO_DIST = Path(os.environ.get("TETCLIPPER_STUDIO_DIST") or Path(__file__).resolve().parents[3] / "studio" / "editor" / "dist")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
+
+
+THUMB_W, THUMB_H = 360, 640
+
+
+def _thumb_inputs(job_dir: Path, clip: int) -> list[Path]:
+    cdir = store.clip_dir(job_dir, clip)
+    return [p for p in (store.spec_path(job_dir, clip), cdir / "render.mp4") if p.exists()]
+
+
+def _thumb_version(job_dir: Path, clip: int) -> int:
+    """Changes whenever the thumbnail would: the card's image URL carries it."""
+    return int(max((p.stat().st_mtime for p in _thumb_inputs(job_dir, clip)), default=0))
+
+
+def _crop_at(spec: dict, t: float) -> dict:
+    """The camera path at source time t (VideoLayer.tsx cropAt)."""
+    kfs = (spec.get("crop") or {}).get("keyframes") or []
+    if not kfs:
+        return {"x": 0.5, "y": 0.5, "zoom": 1}
+    if t <= kfs[0]["t"]:
+        return kfs[0]
+    for a, b in zip(kfs, kfs[1:]):
+        if t >= b["t"]:
+            continue
+        if b.get("cut") or b["t"] <= a["t"]:
+            return a
+        p = (t - a["t"]) / (b["t"] - a["t"])
+        return {k: a[k] + (b[k] - a[k]) * p for k in ("x", "y", "zoom")}
+    return kfs[-1]
+
+
+def thumbnail(job_id: str, clip: int) -> Path | None:
+    """A 9:16 frame of the clip as it will look, kept next to its spec and
+    remade when the spec or render changes: from the render when there is
+    one, else the source framed by the clip's camera path a second in."""
+    from ..render import ffmpeg_bin
+
+    job_dir = _job_dir(job_id)
+    spec = store.load(job_dir, clip)
+    if spec is None:
+        return None
+    out = store.clip_dir(job_dir, clip) / "thumb.jpg"
+    if out.exists() and out.stat().st_mtime >= _thumb_version(job_dir, clip):
+        return out
+    render = store.clip_dir(job_dir, clip) / "render.mp4"
+    if render.exists():
+        src, t, vf = render, 1.0, f"scale={THUMB_W}:{THUMB_H}"
+    else:
+        source = spec["source"]
+        src = job_dir / source["src"]
+        t = source["start"] + min(1.0, (source["end"] - source["start"]) / 2)
+        for cut in spec.get("cuts") or []:  # not a frame the clip cuts out
+            if cut["start"] <= t < cut["end"]:
+                t = cut["end"] + 0.1
+        crop, sw, sh = _crop_at(spec, t), source["width"], source["height"]
+        scale = max(THUMB_W / sw, THUMB_H / sh) * crop["zoom"]
+        vw, vh = max(THUMB_W, round(sw * scale)), max(THUMB_H, round(sh * scale))
+        left = min(vw - THUMB_W, max(0, round(crop["x"] * vw - THUMB_W / 2)))
+        top = min(vh - THUMB_H, max(0, round(crop["y"] * vh - THUMB_H / 2)))
+        vf = f"scale={vw}:{vh},crop={THUMB_W}:{THUMB_H}:{left}:{top}"
+    if not src.exists():
+        return None
+    part = out.with_name(f"thumb.{os.getpid()}.{threading.get_ident()}.jpg")
+    try:
+        subprocess.run([ffmpeg_bin.ffmpeg(), "-v", "error", "-y", "-ss", f"{t:.3f}", "-i", str(src),
+                        "-frames:v", "1", "-vf", vf, "-q:v", "4", str(part)],
+                       capture_output=True, timeout=30, check=True)
+        part.replace(out)
+    except (subprocess.SubprocessError, OSError):
+        part.unlink(missing_ok=True)
+        return None
+    return out
 
 
 def _job_dir(job_id: str) -> Path:
@@ -149,6 +223,7 @@ def studio_jobs() -> list[dict]:
                 {
                     "clip": c,
                     "rendered": (store.clip_dir(job_dir, c) / "render.mp4").exists(),
+                    "thumb": _thumb_version(job_dir, c),
                     "style": (store.load(job_dir, c) or {}).get("captions", {}).get("style"),
                     # auto-found moments carry the judge's score and summary
                     "score": None if c >= len(scored) or scored[c].get("manual") else scored[c].get("score"),

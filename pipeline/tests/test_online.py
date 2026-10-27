@@ -99,3 +99,45 @@ def test_a_reconnecting_event_stream_gets_what_it_missed():
         assert b.missed(None, "/ws/a") == [] and b.missed("0123abcd-1", "/ws/a") == []
     finally:
         b.loop.close()
+
+
+def test_clip_cards_get_a_real_frame_framed_like_the_clip(client, monkeypatch):
+    """/api/thumb: a 9:16 frame from the source, cropped where the camera
+    points; media tokens open it, other users' jobs stay hidden."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from tetclipper_pipeline.render import ffmpeg_bin
+    from tetclipper_pipeline.server import studio
+
+    c, job = client
+    # The camera path, as the composition reads it.
+    spec = {"crop": {"keyframes": [{"t": 0, "x": 0.2, "y": 0.5, "zoom": 1}, {"t": 2, "x": 0.6, "y": 0.5, "zoom": 1},
+                                   {"t": 3, "x": 0.9, "y": 0.5, "zoom": 1.2, "cut": True}]}}
+    assert studio._crop_at(spec, 1)["x"] == 0.4
+    assert studio._crop_at(spec, 2.5)["x"] == 0.6  # holds until a cut
+    assert studio._crop_at(spec, 9)["x"] == 0.9
+
+    media = cmd(c, "me", "token-b").json()["media_token"]
+    assert c.get("/api/thumb", params={"job": "job1", "clip": 0, "access_token": media}).status_code == 404
+    listed = cmd(c, "studio_jobs", "token-a").json()[0]["clips"][0]
+    assert listed["thumb"] > 0
+    real = Path(str(Path.home() / ".tetclipper" / "bin" / "ffmpeg.exe"))
+    exe = shutil.which("ffmpeg") or (str(real) if real.exists() else None)
+    if not exe:
+        pytest.skip("no ffmpeg here")
+    monkeypatch.setattr(ffmpeg_bin, "ffmpeg", lambda: exe)
+    # Left half red, right half blue; the clip's camera points at the right.
+    subprocess.run([exe, "-v", "error", "-y", "-f", "lavfi", "-i", "color=red:s=960x1080:d=30", "-f", "lavfi",
+                    "-i", "color=blue:s=960x1080:d=30", "-filter_complex", "hstack", "-t", "30", str(job / "media.mp4")],
+                   check=True)
+    s = store.load(job, 0)
+    s["crop"] = {"keyframes": [{"t": 0, "x": 0.8, "y": 0.5, "zoom": 1}]}
+    store.save(job, 0, s, reason="camera right")
+    media = cmd(c, "me", "token-a").json()["media_token"]
+    r = c.get("/api/thumb", params={"job": "job1", "clip": 0, "access_token": media})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    pixel = subprocess.run([exe, "-v", "error", "-i", str(job / "studio" / "clip_00" / "thumb.jpg"), "-vf",
+                            "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+    assert pixel[2] > 150 and pixel[0] < 80  # blue: framed where the camera points

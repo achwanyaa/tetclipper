@@ -1,5 +1,5 @@
 import { PRESETS } from '@tetclipper/composition'
-import { fmt, type JobSummary } from '../api'
+import { fmt, thumbUrl, type JobSummary } from '../api'
 import type { Run } from '../App'
 import type { FindArgs } from './NewClip'
 
@@ -148,7 +148,16 @@ export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun
               {job.clips.map((c) => (
                 <button key={c.clip} className="clip-card" title={c.summary ?? undefined} onClick={() => onOpen(job.id, c.clip)}>
                   <div className="thumb">
-                    <img src={STILL(c.style ?? 'hormozi')} alt="" loading="lazy" />
+                    <img
+                      src={c.thumb != null ? thumbUrl(job.id, c.clip, c.thumb) : STILL(c.style ?? 'hormozi')}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => {
+                        // An older server, or a frame that couldn't be made: show the style instead.
+                        const fallback = STILL(c.style ?? 'hormozi')
+                        if (!e.currentTarget.src.endsWith(fallback)) e.currentTarget.src = fallback
+                      }}
+                    />
                     {c.score != null && <span className="score">Score {Math.round(c.score)}</span>}
                   </div>
                   <div className="meta">
