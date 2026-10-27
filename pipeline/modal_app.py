@@ -4,7 +4,7 @@
     modal deploy pipeline/modal_app.py        # prints the https URL
 
 Studio (driven from the PC by tetclipper_pipeline/cloud/client.py):
-  analyze  T4 GPU: ASR → diarize → events → camera → clip spec for a range
+  analyze  GPU (T4, else L4/A10G): ASR → diarize → events → camera → clip spec for a range
            whose download/ingest the PC uploaded to the volume
   render   16 CPUs, node + Chromium: Remotion-renders a clip spec to mp4
 
@@ -13,10 +13,13 @@ the `tetclipper-home` Volume, mounted as TETCLIPPER_HOME. The web endpoint
 serves the built Studio editor (studio/editor/dist) next to the API. Studio
 chat needs the Claude Code CLI, so it only works in a local `tetclipper serve`.
 
-There is exactly one web container (max_containers=1): live events, chat
-state and the spec watcher live in its memory, so a second container would
-miss them. It stays up while a browser tab is open (its SSE stream is an open
-request) or a job is running (server/app.py pings TETCLIPPER_PUBLIC_URL), plus
+There is one web container in normal use: live events, chat state and the
+spec watcher live in its memory, so a second one would miss them (job
+progress is also kept in progress.json and polled, so it survives that).
+max_containers=2 is headroom for deploys only: the old version's container
+lingers while any browser tab holds its SSE stream open, and with a limit of 1
+it kept the new version from starting at all. It stays up while a tab is open
+or a job is running (server/app.py pings TETCLIPPER_PUBLIC_URL), plus
 SCALEDOWN seconds; jobs also checkpoint after every stage.
 """
 from __future__ import annotations
@@ -30,7 +33,9 @@ import modal
 HERE = Path(__file__).resolve().parent  # pipeline/
 REPO = HERE.parent
 HOME = "/data"
-GPU = os.environ.get("TETCLIPPER_MODAL_GPU", "T4")
+# Cheapest first; Modal falls back down the list when it has no T4s free
+# (a deploy once sat for minutes "waiting to be scheduled on a GPU_T4 worker").
+GPU = os.environ.get("TETCLIPPER_MODAL_GPU", "T4,L4,A10G").split(",")
 SCALEDOWN = 15 * 60
 
 app = modal.App("tetclipper")
@@ -113,7 +118,7 @@ def _commit_forever(every: float = 30.0) -> None:
     secrets=[modal.Secret.from_name("tetclipper-web"), modal.Secret.from_name("tetclipper-supabase")],
     timeout=60 * 60,
     scaledown_window=SCALEDOWN,
-    max_containers=1,
+    max_containers=2,
     cpu=8.0,
     memory=16384,
 )
