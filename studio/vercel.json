@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build -w editor",
+  "outputDirectory": "editor/dist",
+  "redirects": [{ "source": "/", "destination": "/studio/", "permanent": false }],
+  "rewrites": [{ "source": "/studio/:path*", "destination": "/:path*" }]
+}

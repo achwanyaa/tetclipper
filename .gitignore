@@ -28,8 +28,12 @@ node_modules/
 secrets.json
 .env
 .env.*
+env.local
 *.log
 
 # per-machine deployment pointer
 .claude/deploy-url.txt
 .claude/settings.local.json
+
+.vercel
+.env*
