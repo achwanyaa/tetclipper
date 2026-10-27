@@ -1,10 +1,10 @@
 # tetclipper: system brief for the online UI
 
 This brief describes tetclipper as it works today and the online version we are about to build. It is written for
-Claude Design, which will design the online UI. Every path below is an absolute path on this PC, so the files can be opened
-directly.
+Claude Design, which will design the online UI.
 
-> **Repo root:** `C:\Users\sajim\Desktop\tetclipper`
+> **Repo:** https://github.com/achwanyaa/tetclipper (branch `main`). Every path below is relative to the repo root.
+> **Screenshots** of every current screen are in `docs/screens/` (section 4.0). A real clip spec is `docs/sample-spec.json`.
 > The product's name is **tetclipper**, always lower case and nothing else.
 
 ---
@@ -17,7 +17,7 @@ directly.
    Improve hierarchy, density, states and polish so it feels like a professional editing bay, not a developer tool.
 3. **All states:** for every screen, its empty, loading, progress, error and success states (section 4.7 lists what exists
    today).
-4. **Output format:** React + CSS that drops into the existing editor (`studio\editor\src`). Reuse or extend the CSS tokens
+4. **Output format:** React + CSS that drops into the existing editor (`studio/editor/src`). Reuse or extend the CSS tokens
    in section 8 rather than inventing a parallel system. If that's not practical, mockups are fine, with every screen and
    state shown and the tokens named.
 
@@ -99,9 +99,27 @@ leaving and coming back.
 
 ## 4. The screens as they exist today
 
-Run it live (section 10), then open the clip **"The Worthy Lamb With Pst Catherine"** in the sidebar. It is a real
-6.5-minute clip with 922 caption words, 39 cuts, 49 punch-in zooms (placed by the camera director), Beast captions and an
-intro photo. It has no music yet.
+Most screenshots show the clip **"The Worthy Lamb With Pst Catherine" · clip 1**. It is a real clip: a 6.5-minute range
+cut down to 3:16, with 922 caption words, 39 cuts, 49 punch-in zooms (placed by the camera director), Beast captions and an
+intro photo. It has no music yet. Its spec is `docs/sample-spec.json`.
+
+### 4.0 Screenshots
+All are 1440×900, taken from the running local Studio on 2026-10-27, in `docs/screens/`:
+
+| File | What it shows |
+|---|---|
+| `01-start.png` | Nothing open: the new clip form, the jobs list (a find-moments job with score chips, then range jobs), the empty center |
+| `02-new-clip-find-moments.png` | The new clip form in Find moments mode (optional range, "Best N moments") |
+| `03-clip-captions.png` | A clip open: toolbar, live preview with Beast captions, Captions tab, a chat with history |
+| `04-captions-selection.png` | A shift-click span selected in the transcript, with its Cut out / Hide/show / Emphasis bar |
+| `05-style.png` | Style tab (the controls; the 9-style gallery sits above them, scrolled out of view) |
+| `06-intro.png` | Intro tab |
+| `07-music.png` | Music tab, empty state |
+| `08-effects.png` | Effects tab: the catalogue in 4 groups, then the placed effects |
+| `09-effects-placed.png` | Effects tab scrolled to the end of 49 placed punch-ins |
+| `10-trim.png` | Trim tab: dead air, stutters, start/end nudges, the cuts list |
+| `11-word-list.png` | The word list drawer (learned fixes, phrase chips) over the Captions tab |
+| `12-found-moment-clip.png` | A found-moment clip: score chip, never rendered (no Download/Telegram), a doubtful caption in the check bar, and the chat empty state with example chips |
 
 ### 4.1 Layout
 A three-column app shell, full height, no page scroll. CSS: `.studio { grid-template-columns: 260px 1fr 360px }`, with a
@@ -111,10 +129,10 @@ A three-column app shell, full height, no page scroll. CSS: `.studio { grid-temp
 |---|---|---|
 | new clip form, progress, jobs and clips | toolbar, 9:16 preview, tabs, tool panel | chat with Claude about this clip |
 
-Code: `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\App.tsx`
+Code: `studio/editor/src/App.tsx`
 
 ### 4.2 Sidebar
-Code: `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\Sidebar.tsx`
+Code: `studio/editor/src/components/Sidebar.tsx`
 
 - **New clip form**
   - A mode toggle: **Exact range** | **Find moments** ("Claude finds the best moments for you").
@@ -135,7 +153,7 @@ Code: `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\Sidebar.ts
   - the open clip is highlighted
 
 ### 4.3 Canvas: toolbar and preview
-Code: `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\Canvas.tsx`
+Code: `studio/editor/src/components/Canvas.tsx`
 
 - **Toolbar:**
   - left: title "The Worthy Lamb With Pst Catherine · clip 1", **↶ Undo** (yours or Claude's) and the version "v12"
@@ -149,7 +167,7 @@ Code: `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\Canvas.tsx
 - The playhead is shared: clicking a word jumps the player, and new effects are added at the playhead.
 
 ### 4.4 Tab panels
-All in `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\`.
+All in `studio/editor/src/components/`.
 
 **Captions**: `Transcript.tsx`, `CheckBar.tsx`, `WordList.tsx`
 - **Check bar** (top), for doubtful captions:
@@ -181,7 +199,7 @@ All in `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\`.
   - One word: one big word at a time
   - Boxed: white text on a black bar
   - Neon: glowing caps with emoji
-- The stills are in `C:\Users\sajim\Desktop\tetclipper\studio\editor\public\styles\` (`classic.png`, `beast.png`,
+- The stills are in `studio/editor/public/styles/` (`classic.png`, `beast.png`,
   `hormozi.png`, `minimal.png`, `karaoke-pop.png`, `sermon.png`, `one-word.png`, `boxed.png`, `neon.png`).
 - **Controls:**
   - Captions on/off
@@ -240,7 +258,7 @@ All in `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\`.
 - **Cuts list**: every cut with a jump link and "restore".
 
 ### 4.5 Chat (right column)
-Code: `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\Chat.tsx`
+Code: `studio/editor/src/components/Chat.tsx`
 
 - Header: the title, a **"run scripts"** toggle (lets Claude run helper scripts), and **"new chat"**.
 - Empty state: "Tell Claude how you want this clip. It edits the spec and the preview updates live." It is followed by
@@ -371,12 +389,12 @@ the UI is a view over this one object. **Times are in seconds of the source vide
 followed by the source range minus the cuts.
 
 - **Source of truth (zod):**
-  - `C:\Users\sajim\Desktop\tetclipper\studio\composition\src\spec.ts`
+  - `studio/composition/src/spec.ts`
 - **JSON Schema** (generated):
-  - `C:\Users\sajim\Desktop\tetclipper\studio\composition\spec.schema.json`
-  - a copy for the Python side: `C:\Users\sajim\Desktop\tetclipper\pipeline\tetclipper_pipeline\spec\spec.schema.json`
+  - `studio/composition/spec.schema.json`
+  - a copy for the Python side: `pipeline/tetclipper_pipeline/spec/spec.schema.json`
 - **Output timeline maths** (cuts, intro, frames):
-  - `C:\Users\sajim\Desktop\tetclipper\studio\composition\src\timeline.ts`
+  - `studio/composition/src/timeline.ts`
 
 | Field | What it is | Edited in |
 |---|---|---|
@@ -420,15 +438,15 @@ the doubt, the Swahili words and the title card are added to show every field:
 }
 ```
 
-The real file for the sample clip (922 words, 144 KB) is at
-`C:\Users\sajim\.tetclipper\jobs\20261016-105403-8f61c5\studio\clip_00\spec.json`.
+The real file for the sample clip (922 words, 39 cuts, 49 punch-ins, 144 KB) is `docs/sample-spec.json`. Its media
+paths point into the clip folder, which is not in the repo.
 
-Each clip folder `C:\Users\sajim\.tetclipper\jobs\<job id>\studio\clip_NN\` holds:
+Each clip folder (on the server, `~/.tetclipper/jobs/<job id>/studio/clip_NN/`, not in the repo) holds:
 - `spec.json`
-- `history\` (one snapshot per undo step)
+- `history/` (one snapshot per undo step)
 - `chat.json`
 - `transcript.md`
-- `assets\` (intro photo, music)
+- `assets/` (intro photo, music)
 - `render.mp4` (after a render)
 - `fg.webm` (the cutout)
 
@@ -457,7 +475,7 @@ Each clip folder `C:\Users\sajim\.tetclipper\jobs\<job id>\studio\clip_NN\` hold
 ## 8. Current visual language
 
 The "editing bay" theme: near-black panels, warm off-white text and a single **amber accent**. Inter at 14 px, 8 px radius.
-Tokens from `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\styles.css`:
+Tokens from `studio/editor/src/styles.css`:
 
 ```css
 --bg:        #0e0f11;   /* app background */
@@ -484,19 +502,22 @@ and the dark stage. Class names in use: `.studio`, `.center`, `.canvas`, `.toolb
 ## 9. Where everything lives
 
 ```
-C:\Users\sajim\Desktop\tetclipper\
+tetclipper/
 ├─ README.md
-├─ docs\SYSTEM.md                       ← this brief
-├─ studio\
-│  ├─ editor\                           ← the Studio web app (React + Vite, served at /studio/)
-│  │  ├─ public\styles\*.png            ← caption style stills (9)
+├─ docs/
+│  ├─ SYSTEM.md                         ← this brief
+│  ├─ sample-spec.json                  ← the sample clip's real spec
+│  └─ screens/*.png                     ← screenshots of the current Studio (section 4.0)
+├─ studio/
+│  ├─ editor/                           ← the Studio web app (React + Vite, served at /studio/)
+│  │  ├─ public/styles/*.png            ← caption style stills (9)
 │  │  ├─ vite.config.ts                 ← base /studio/, proxies /api and /files to :8765
-│  │  └─ src\
+│  │  └─ src/
 │  │     ├─ App.tsx                     ← app shell, state, autosave, undo, render/cut/find actions
 │  │     ├─ api.ts                      ← invoke(command), onEvent (SSE), upload, mediaUrl
 │  │     ├─ retext.ts                   ← retiming when a caption is retyped
 │  │     ├─ styles.css                  ← all styles and tokens
-│  │     └─ components\
+│  │     └─ components/
 │  │        ├─ Sidebar.tsx              ← new clip form, progress, jobs/clips
 │  │        ├─ Canvas.tsx               ← toolbar, Player, tabs
 │  │        ├─ Transcript.tsx           ← Captions tab (word tokens, selection actions)
@@ -508,37 +529,37 @@ C:\Users\sajim\Desktop\tetclipper\
 │  │        ├─ EffectsPanel.tsx         ← effect catalogue + placed effects
 │  │        ├─ TrimPanel.tsx            ← dead air, stutters, start/end nudges
 │  │        └─ Chat.tsx                 ← Claude chat sidebar
-│  └─ composition\                      ← the Remotion video (shared by preview and render)
+│  └─ composition/                      ← the Remotion video (shared by preview and render)
 │     ├─ spec.schema.json
-│     ├─ scripts\                       ← render.mjs, bundle.mjs, gallery.mjs (style stills), export-schema.ts
-│     └─ src\
+│     ├─ scripts/                       ← render.mjs, bundle.mjs, gallery.mjs (style stills), export-schema.ts
+│     └─ src/
 │        ├─ spec.ts                     ← THE clip schema (zod), FPS/WIDTH/HEIGHT
 │        ├─ timeline.ts                 ← source time ↔ output frame maths
 │        ├─ VerticalClip.tsx            ← layers: video → behind-speaker → speaker → overlays → captions → intro → music
 │        ├─ VideoLayer.tsx, Intro.tsx, music.ts, Root.tsx
-│        ├─ captions\                   ← Captions.tsx, presets.ts (the 9 styles), chunk.ts, emoji.ts
-│        ├─ effects\                    ← Overlays.tsx, graphics.tsx, styles.tsx, behind.tsx
-│        └─ dev\DevRoot.tsx             ← dev compositions per effect and style (Remotion Studio)
-└─ pipeline\                            ← Python backend (uv project)
+│        ├─ captions/                   ← Captions.tsx, presets.ts (the 9 styles), chunk.ts, emoji.ts
+│        ├─ effects/                    ← Overlays.tsx, graphics.tsx, styles.tsx, behind.tsx
+│        └─ dev/DevRoot.tsx             ← dev compositions per effect and style (Remotion Studio)
+└─ pipeline/                            ← Python backend (uv project)
    ├─ modal_app.py                      ← Modal cloud app: web, analyze, build_spec, matte, second_listen, render, render_chunk
-   ├─ tests\
-   └─ tetclipper_pipeline\
+   ├─ tests/
+   └─ tetclipper_pipeline/
       ├─ cli.py                         ← `tetclipper` command (serve, cut, find, spec, …)
-      ├─ server\
+      ├─ server/
       │  ├─ app.py                      ← HTTP server: /api commands, SSE events, /files, /api/upload
       │  ├─ studio.py                   ← every Studio command (list below)
       │  └─ studio_chat.py              ← chat with Claude (to be replaced by the lean API agent)
-      ├─ spec\                          ← build, store (history/undo), schema, timeline, silence (dead air), stutters,
+      ├─ spec/                          ← build, store (history/undo), schema, timeline, silence (dead air), stutters,
       │                                   doubts, glossary (word list), matte, find, render, music, emphasis
-      ├─ ingest\                        ← download/trim the source (normalize.trim does the range cut)
-      ├─ asr\, diarize\, events\        ← transcription (whisperX), speakers, laughter/applause events
-      ├─ camera\                        ← the virtual camera director (active-speaker framing)
-      ├─ scoring\                       ← find-moments judging (judging.md holds the rubric)
-      ├─ cloud\                         ← client for the Modal functions
-      └─ delivery\                      ← Telegram
+      ├─ ingest/                        ← download/trim the source (normalize.trim does the range cut)
+      ├─ asr/, diarize/, events/        ← transcription (whisperX), speakers, laughter/applause events
+      ├─ camera/                        ← the virtual camera director (active-speaker framing)
+      ├─ scoring/                       ← find-moments judging (judging.md holds the rubric)
+      ├─ cloud/                         ← client for the Modal functions
+      └─ delivery/                      ← Telegram
 ```
 
-**Server commands the UI calls** (`invoke(name, args)` → `POST /api/cmd/<name>`, in `server\studio.py`):
+**Server commands the UI calls** (`invoke(name, args)` → `POST /api/cmd/<name>`, in `server/studio.py`):
 
 | Group | Commands |
 |---|---|
@@ -556,8 +577,8 @@ C:\Users\sajim\Desktop\tetclipper\
 The online version adds login/logout, me (the user plus usage), Drive file registration, upload URLs, and the model choice
 on `studio_chat_send`.
 
-**Data on disk:** `C:\Users\sajim\.tetclipper\`:
-- `jobs\<job id>\` for analysis checkpoints and the `studio\clip_NN\` folders
+**Data on disk:** `~/.tetclipper/`:
+- `jobs/<job id>/` for analysis checkpoints and the `studio/clip_NN/` folders
 - the job database
 - the word list
 
@@ -567,17 +588,21 @@ Online, the same layout lives per user at `/data/users/<name>/` on the Modal vol
 
 ## 10. Running it locally to see the real thing
 
-The server is usually already running at **http://localhost:8765/studio/**. To start it:
+This needs the owner's PC: the server, the analysed jobs and the media live there. Without it, use the screenshots in
+section 4.0.
+
+On the owner's PC the server is usually already running at **http://localhost:8765/studio/**. To start it, from the repo
+root:
 
 ```powershell
-cd C:\Users\sajim\Desktop\tetclipper\pipeline
+cd pipeline
 uv run tetclipper serve          # → http://localhost:8765/studio/
 ```
 
 For live-reloading UI work, run Vite next to it. It proxies `/api` and `/files` to the server on port 8765:
 
 ```powershell
-cd C:\Users\sajim\Desktop\tetclipper\studio\editor
+cd studio/editor
 npm run dev                      # → http://localhost:5173/studio/
 ```
 
