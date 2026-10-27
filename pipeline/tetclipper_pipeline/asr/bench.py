@@ -39,6 +39,8 @@ from . import swahili
 
 RATE = 16000
 CONTEXT_WORDS = 2  # either side of a retyped word: one word alone is too short to hear
+MIN_SEC = 4.0  # shortest piece worth hearing; spans grow to this many seconds of whole words
+MAX_GAP_SEC = 1.2  # …but not across a longer pause
 MODES = ("sw", "en", "auto")
 KINDS = ("retyped", "swahili", "checked", "gold")  # how the user checked a span, most telling first
 
@@ -78,6 +80,31 @@ def _context(words: list[dict], i: int) -> tuple[int, int]:
     return a, b
 
 
+def _widen(words: list[dict], a: int, b: int) -> tuple[int, int, float, float]:
+    """Grow a span to MIN_SEC of whole words and cut the audio halfway between
+    words, so every word in the audio is in the reference. Short pieces make
+    every model guess (and leak the hint prompt: "Yaani you can" came back as
+    "Sasa kwa hivyo, I- mean"); stray halves of neighbours read as errors."""
+    def dur() -> float:
+        return words[b]["end"] - words[a]["start"]
+
+    while dur() < MIN_SEC:
+        grew = False
+        if a > 0 and words[a]["start"] - words[a - 1]["end"] < MAX_GAP_SEC:
+            a, grew = a - 1, True
+        if dur() < MIN_SEC and b + 1 < len(words) and words[b + 1]["start"] - words[b]["end"] < MAX_GAP_SEC:
+            b, grew = b + 1, True
+        if not grew:
+            break
+    lo = words[a]["start"] - doubts.PAD_SEC
+    if a > 0:
+        lo = max(lo, (words[a - 1]["end"] + words[a]["start"]) / 2)
+    hi = words[b]["end"] + doubts.PAD_SEC
+    if b + 1 < len(words):
+        hi = min(hi, (words[b]["end"] + words[b + 1]["start"]) / 2)
+    return a, b, max(0.0, lo), hi
+
+
 def from_history(job_dir: Path, clip: int = 0) -> list[dict]:
     """Spans of one clip the user checked by ear, with what was really said.
 
@@ -95,15 +122,19 @@ def from_history(job_dir: Path, clip: int = 0) -> list[dict]:
 
     def snap(a: int, b: int, kind: str, words: list[dict], before: list[dict]) -> None:
         old = found.get((epoch, a, b))
-        if old is None:  # overlapping or touching spans become one; a retyped one says the most
-            for k in [k for k in found if k[0] == epoch and k[1] - 1 <= b and a <= k[2] + 1]:
-                a, b = min(a, k[1]), max(b, k[2])
-                kind = min(kind, found.pop(k)["kind"], key=KINDS.index)
+        if old is None:
+            a, b = _widen(words, a, b)[:2]
+            # Overlapping spans become one; a retyped one says the most.
+            while overlap := [k for k in found if k[0] == epoch and k[1] <= b and a <= k[2]]:
+                for k in overlap:
+                    a, b = min(a, k[1]), max(b, k[2])
+                    kind = min(kind, found.pop(k)["kind"], key=KINDS.index)
         for i in range(a, b + 1):
             original.setdefault(i, before[i])
+        lo, hi = _widen(words, a, b)[2:]
         found[(epoch, a, b)] = {
             "kind": old["kind"] if old else kind,
-            "start": words[a]["start"], "end": words[b]["end"],
+            "start": lo, "end": hi,
             "ref": _visible_text(words, a, b),
             "heard": _visible_text([original[i] for i in range(a, b + 1)], 0, b - a),
         }
@@ -139,8 +170,8 @@ def from_history(job_dir: Path, clip: int = 0) -> list[dict]:
         if not item["ref"] and not item["heard"]:
             continue
         out.append({"id": f"{job_dir.name}:{clip}:{len(out)}", "audio": str(job_dir / "audio16k.wav"),
-                    "start": round(max(0.0, item["start"] - doubts.PAD_SEC), 3),
-                    "end": round(item["end"] + doubts.PAD_SEC, 3), **{k: item[k] for k in ("kind", "ref", "heard")}})
+                    "start": round(item["start"], 3), "end": round(item["end"], 3),
+                    **{k: item[k] for k in ("kind", "ref", "heard")}})
     return out
 
 

@@ -76,3 +76,26 @@ def test_only_the_admin_manages_the_ai_model(client):
     c, _ = client
     assert cmd(c, "ai_settings_get", "token-b").status_code == 400
     assert cmd(c, "ai_settings_get", "token-a").json()["provider"] == "claude-code"
+
+
+def test_health_is_public_and_tells_only_the_running_count(client):
+    c, _ = client
+    assert c.get("/api/health").json() == {"running": 0}
+
+
+def test_a_reconnecting_event_stream_gets_what_it_missed():
+    """Streams end every STREAM_SEC; Last-Event-ID replays the gap, per workspace."""
+    import asyncio
+
+    b = server.Broadcaster()
+    b.loop = asyncio.new_event_loop()
+    try:
+        b.publish({"n": 1}, workspace="/ws/a")
+        b.publish({"n": 2}, workspace="/ws/b")
+        b.publish({"n": 3}, workspace="/ws/a")
+        assert [e for _, _, e in b.missed(f"{b.boot}-1", "/ws/a")] == [{"n": 3}]
+        assert [e for _, _, e in b.missed(f"{b.boot}-0", "/ws/b")] == [{"n": 2}]
+        # No id, or an id from another container (before a deploy): nothing to replay.
+        assert b.missed(None, "/ws/a") == [] and b.missed("0123abcd-1", "/ws/a") == []
+    finally:
+        b.loop.close()

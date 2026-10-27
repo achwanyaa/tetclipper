@@ -6,11 +6,12 @@ from tetclipper_pipeline.asr import bench, swahili
 from tetclipper_pipeline.spec import doubts, store
 
 
-def _words(texts, gap=0.0):
+def _words(texts):
+    """0.3 s words, 0.1 s apart; a word ending in "." is followed by a 2 s pause."""
     out, t = [], 10.0
     for text in texts:
         out.append({"text": text, "start": round(t, 3), "end": round(t + 0.3, 3)})
-        t += 0.4 + gap
+        t += 2.3 if text.endswith(".") else 0.4
     return out
 
 
@@ -38,13 +39,22 @@ def test_reference_comes_from_what_the_user_checked(tmp_path):
     # Claude's later guess changes the word count: nothing after it counts.
     _save(hist, 7, w[:-1], "claude", [])
     segs = bench.from_history(tmp_path, 0)
+    # Each piece grows to whole words around it, up to a long pause: every
+    # word in the audio is in the reference.
     assert [(s["kind"], s["ref"], s["heard"]) for s in segs] == [
-        ("checked", "you can", "you can"),
-        ("retyped", "for me kukosana na watu to watu on a", "for me to go to work on a"),
+        ("checked", "Then you can go.", "Then you can go."),
+        ("retyped", "And it is for me kukosana na watu to watu on a", "And it is for me to go to work on a"),
     ]
-    assert segs[0]["start"] == round(base[1]["start"] - doubts.PAD_SEC, 3)
-    assert segs[1]["end"] == round(base[14]["end"] + doubts.PAD_SEC, 3)
+    assert segs[0]["start"] == round(base[0]["start"] - doubts.PAD_SEC, 3)  # nothing before: padded
+    assert segs[0]["end"] == round(base[3]["end"] + doubts.PAD_SEC, 3)  # a 2 s pause after: padded
     assert all(s["audio"].endswith("audio16k.wav") for s in segs)
+
+
+def test_pieces_are_cut_between_words():
+    words = [{"text": t, "start": 1.0 * i, "end": 1.0 * i + 0.8} for i, t in enumerate("a b c d e f g h".split())]
+    a, b, lo, hi = bench._widen(words, 3, 3)
+    assert words[b]["end"] - words[a]["start"] >= bench.MIN_SEC
+    assert lo == (words[a - 1]["end"] + words[a]["start"]) / 2 and hi == (words[b]["end"] + words[b + 1]["start"]) / 2
 
 
 def test_scoring_counts_word_letter_and_swahili_errors():

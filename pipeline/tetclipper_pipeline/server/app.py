@@ -6,6 +6,7 @@ The Studio editor (studio/editor, served at /studio/) talks to this:
                          plus spec changes and chat streaming
   GET  /files?path=...   a file under TETCLIPPER_HOME (byte ranges for <video>)
   POST /api/upload       raw request body -> TETCLIPPER_HOME/uploads/<name>
+  GET  /api/health       how many pipelines are running (no sign-in; for deploys)
 and the built editor at /studio/ (/ redirects there).
 
 It is a thin proxy: anything heavier than a file read shells out to the
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import collections
 import contextvars
 import hashlib
 import hmac
@@ -134,11 +136,25 @@ def run_cli_json(args: list[str]) -> Any:
 
 class Broadcaster:
     """Fan pipeline events out to the open /api/events streams. Online, each
-    stream belongs to one workspace and only gets that workspace's events."""
+    stream belongs to one workspace and only gets that workspace's events.
+
+    Events carry ids ("<boot>-<n>") and the last REPLAY are kept, so a stream
+    that reconnects (streams end every STREAM_SEC) gets what it missed. Ids
+    from another container (an old version, before a deploy) replay nothing."""
+
+    REPLAY = 300
 
     def __init__(self) -> None:
         self.subscribers: dict[asyncio.Queue, str | None] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
+        self.boot = _secrets_mod.token_hex(4)
+        self.seq = 0
+        self.recent: collections.deque[tuple[int, str | None, dict]] = collections.deque(maxlen=self.REPLAY)
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def _sees(owner: str | None, key: str | None) -> bool:
+        return owner is None or key is None or owner == key
 
     def publish(self, event: dict, workspace: Path | None = None) -> None:
         # Called from worker threads; the workspace defaults to the caller's.
@@ -146,9 +162,21 @@ class Broadcaster:
             return
         ws = workspace or config.WORKSPACE.get()
         key = str(ws) if ws else None
+        with self.lock:
+            self.seq += 1
+            item = (self.seq, key, event)
+            self.recent.append(item)
         for q, owner in list(self.subscribers.items()):
-            if owner is None or key is None or owner == key:
-                self.loop.call_soon_threadsafe(q.put_nowait, event)
+            if self._sees(owner, key):
+                self.loop.call_soon_threadsafe(q.put_nowait, item)
+
+    def missed(self, last_event_id: str | None, owner: str | None) -> list[tuple[int, str | None, dict]]:
+        """Events after `last_event_id` this stream would have seen."""
+        boot, _, n = (last_event_id or "").partition("-")
+        if boot != self.boot or not n.isdigit():
+            return []
+        with self.lock:
+            return [item for item in self.recent if item[0] > int(n) and self._sees(owner, item[1])]
 
 
 events = Broadcaster()
@@ -415,7 +443,7 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 @app.middleware("http")
 async def _require_token(request: Request, call_next):
     path = request.url.path
-    public = ("/api/login", "/api/auth-config")
+    public = ("/api/login", "/api/auth-config", "/api/health")
     protected = path.startswith(("/api/", "/files")) and path not in public and request.method != "OPTIONS"
     if AUTH == "supabase" and protected:
         header = request.headers.get("authorization", "")
@@ -435,6 +463,12 @@ async def _require_token(request: Request, call_next):
         if not _secrets_mod.compare_digest(given, WEB_TOKEN):
             return JSONResponse({"error": "auth"}, status_code=401)
     return await call_next(request)
+
+
+@app.get("/api/health")
+async def health() -> dict:
+    """Pipelines running here: modal_app.py won't deploy over a running job."""
+    return {"running": _running}
 
 
 @app.get("/api/auth-config")
@@ -494,19 +528,33 @@ async def run_command(name: str, request: Request) -> JSONResponse:
     return JSONResponse(result)
 
 
+# Each event stream ends after this long and the browser reconnects (Last-Event-ID
+# replays the gap). After a deploy that moves open tabs to the new version
+# instead of leaving them listening to the old container forever.
+STREAM_SEC = 10 * 60
+
+
 @app.get("/api/events")
 async def stream_events(request: Request) -> StreamingResponse:
     queue: asyncio.Queue = asyncio.Queue()
     ws = config.WORKSPACE.get()
-    events.subscribers[queue] = str(ws) if ws else None
+    owner = str(ws) if ws else None
+    events.subscribers[queue] = owner
+    backlog = events.missed(request.headers.get("last-event-id"), owner)
 
     async def gen():
+        sent = backlog[-1][0] if backlog else 0
+        ends = time.monotonic() + STREAM_SEC
         try:
-            yield ": connected\n\n"
-            while not await request.is_disconnected():
+            yield "retry: 1000\n: connected\n\n"
+            for n, _, event in backlog:
+                yield f"id: {events.boot}-{n}\ndata: {json.dumps(event)}\n\n"
+            while time.monotonic() < ends and not await request.is_disconnected():
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=15)
-                    yield f"data: {json.dumps(event)}\n\n"
+                    n, _, event = await asyncio.wait_for(queue.get(), timeout=15)
+                    if n > sent:  # already replayed from the backlog
+                        sent = n
+                        yield f"id: {events.boot}-{n}\ndata: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
                     yield ": ping\n\n"
         finally:

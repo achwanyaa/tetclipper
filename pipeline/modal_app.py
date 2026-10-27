@@ -25,6 +25,7 @@ SCALEDOWN seconds; jobs also checkpoint after every stage.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -33,6 +34,7 @@ import modal
 HERE = Path(__file__).resolve().parent  # pipeline/
 REPO = HERE.parent
 HOME = "/data"
+PUBLIC_URL = "https://achwanyatours--tetclipper-web.us-east.modal.run"
 # Cheapest first; Modal falls back down the list when it has no T4s free
 # (a deploy once sat for minutes "waiting to be scheduled on a GPU_T4 worker").
 GPU = os.environ.get("TETCLIPPER_MODAL_GPU", "T4,L4,A10G").split(",")
@@ -40,6 +42,34 @@ SCALEDOWN = 15 * 60
 
 app = modal.App("tetclipper")
 volume = modal.Volume.from_name("tetclipper-home", create_if_missing=True)
+
+
+def _refuse_to_deploy_over_running_jobs() -> None:
+    """A deploy moves new requests to a new container while a running job
+    finishes in the old one, whose files the new one can't see until it
+    restarts: the job looks stuck and its clips go missing for a while. So
+    `modal deploy` waits for jobs to finish (TETCLIPPER_DEPLOY_ANYWAY=1 skips)."""
+    if os.environ.get("TETCLIPPER_DEPLOY_ANYWAY") == "1":
+        return
+    import json
+    import urllib.request
+
+    try:
+        if not modal.Function.from_name(app.name, "web").get_current_stats().num_total_runners:
+            return  # no web container up, so nothing running
+        with urllib.request.urlopen(f"{PUBLIC_URL}/api/health", timeout=30) as resp:
+            running = json.load(resp).get("running", 0)
+    except Exception:  # noqa: BLE001 — first deploy, older server, offline: don't block
+        return
+    if running:
+        raise SystemExit(
+            f"{running} job(s) running on the live server. Deploying now would cut them off from "
+            "their users: try again when they finish, or set TETCLIPPER_DEPLOY_ANYWAY=1."
+        )
+
+
+if modal.is_local() and sys.argv[1:2] == ["deploy"]:
+    _refuse_to_deploy_over_running_jobs()
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -53,7 +83,7 @@ image = (
         "TETCLIPPER_CLI": "python -m tetclipper_pipeline.cli",
         "TETCLIPPER_STUDIO_DIST": "/root/studio-dist",
         # Its own address: pinged while a job runs so Modal doesn't scale it down.
-        "TETCLIPPER_PUBLIC_URL": "https://achwanyatours--tetclipper-web.us-east.modal.run",
+        "TETCLIPPER_PUBLIC_URL": PUBLIC_URL,
         # uv_sync also installs a frozen copy of the package into site-packages;
         # the live mount at /root must win, for the server and its CLI subprocesses.
         "PYTHONPATH": "/root",
