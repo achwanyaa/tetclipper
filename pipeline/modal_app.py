@@ -103,7 +103,10 @@ def _commit_forever(every: float = 30.0) -> None:
     image=image,
     gpu=GPU,
     volumes={HOME: volume},
-    secrets=[modal.Secret.from_name("tetclipper-web")],
+    # tetclipper-supabase turns on the online sign-in: TETCLIPPER_AUTH=supabase,
+    # SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TETCLIPPER_ADMINS,
+    # TETCLIPPER_CORS_ORIGINS, TETCLIPPER_MEDIA_SECRET.
+    secrets=[modal.Secret.from_name("tetclipper-web"), modal.Secret.from_name("tetclipper-supabase")],
     timeout=60 * 60,
     scaledown_window=SCALEDOWN,
     cpu=8.0,
