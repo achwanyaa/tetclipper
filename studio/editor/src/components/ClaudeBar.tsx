@@ -87,7 +87,7 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
           </span>
         )}
         <span className="who" title="The AI model the admin chose">
-          {last?.model ?? engine.label}
+          {last?.model ?? (data.chat.available ? engine.label : 'not set up')}
           {!busy && last?.cost != null ? ` · $${last.cost < 0.01 ? last.cost.toFixed(4) : last.cost.toFixed(3)}` : ''}
         </span>
         {!busy && last?.role === 'assistant' && canUndo && (
