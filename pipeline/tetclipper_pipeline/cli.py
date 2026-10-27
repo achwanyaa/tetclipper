@@ -125,8 +125,8 @@ def _ensure_pipeline_deps(jsonl: bool, emit) -> tuple[bool, str | None]:
     torch-via-whisperx, opencv, speechbrain, ...).
 
     That group is deliberately NOT one of uv's default-groups (see
-    pyproject.toml) — a bare `uv run tetclipper ...` (exactly what the
-    desktop app's sidecar spawns) would otherwise try to sync it, and every
+    pyproject.toml) — a bare `uv run tetclipper ...` (exactly what
+    Studio's server spawns) would otherwise try to sync it, and every
     dependency in the whole graph, before `main()` gets to run at all: if
     that opaque pre-launch sync fails (no network, a blocked host, a first
     run interrupted), the child exits non-zero having written to stdout
@@ -146,12 +146,12 @@ def _ensure_pipeline_deps(jsonl: bool, emit) -> tuple[bool, str | None]:
 
 
 def _ensure_net_deps(jsonl: bool, emit) -> tuple[bool, str | None]:
-    """The `net` group (httpx) for the commands the Library and Loop screens
-    run — `audio …` and `ig …` — whose modules import httpx at load.
+    """The `net` group (httpx) for the `audio …` and `brain …` commands,
+    whose modules import httpx at load.
 
     Before the first clip job has run `_ensure_pipeline_deps`, httpx is not
-    in the env at all, and opening either screen on a fresh install died with
-    `ig tool produced no JSON: Traceback … No module named 'httpx'`. This
+    in the env at all, so those commands died on a fresh install with
+    `No module named 'httpx'`. This
     group is a few small pure-Python packages, so syncing it on demand costs
     seconds, not the pipeline group's multi-GB download. `--inexact` (see
     `_ensure_group_deps`) is what keeps this sync from uninstalling the
@@ -171,9 +171,8 @@ def _ensure_net_deps(jsonl: bool, emit) -> tuple[bool, str | None]:
 
 
 def _net_ready(args: argparse.Namespace) -> bool:
-    """Gate for `ig` and `audio`: run the one-time `net` sync first and, when
-    it cannot happen, answer with the one JSON line the shell's ig_tool /
-    edit_tool contract expects instead of a traceback."""
+    """Gate for `audio`: run the one-time `net` sync first and, when it
+    cannot happen, answer with one JSON error line instead of a traceback."""
     ok, err = _ensure_net_deps(args.jsonl, _progress_printer(args.jsonl))
     if ok:
         return True

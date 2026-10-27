@@ -49,10 +49,9 @@ class DiarizeStage(Stage):
             # next attempt re-downloads instead of repeating the crash, and
             # raise a specific, resumable StageError instead of letting the
             # raw torch/pickle exception escape uncaught — an uncaught
-            # exception here crashes the whole sidecar process with its
-            # stderr discarded (app/src-tauri/src/main.rs redirects it to
-            # Stdio::null()), which is what produced the generic "pipeline
-            # exited unexpectedly" banner with no stage attribution.
+            # exception here crashes the whole pipeline process, which is
+            # what produced a generic "pipeline exited unexpectedly" error
+            # with no stage attribution.
             try:
                 registry.model_path(specs.CAMPPLUS).unlink(missing_ok=True)
             except OSError:

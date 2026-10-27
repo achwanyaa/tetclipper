@@ -4,9 +4,8 @@ This brief describes tetclipper as it works today and the online version we are 
 Claude Design, which will design the online UI. Every path below is an absolute path on this PC, so the files can be opened
 directly.
 
-> **Repo root:** `C:\Users\sajim\Desktop\clipper\publikclip`
-> The folder is being renamed to `C:\Users\sajim\Desktop\clipper\tetclipper`. If a path below doesn't open, replace
-> `publikclip` with `tetclipper`. The product's name is **tetclipper**, always lower case and nothing else.
+> **Repo root:** `C:\Users\sajim\Desktop\tetclipper`
+> The product's name is **tetclipper**, always lower case and nothing else.
 
 ---
 
@@ -112,10 +111,10 @@ A three-column app shell, full height, no page scroll. CSS: `.studio { grid-temp
 |---|---|---|
 | new clip form, progress, jobs and clips | toolbar, 9:16 preview, tabs, tool panel | chat with Claude about this clip |
 
-Code: `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\src\App.tsx`
+Code: `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\App.tsx`
 
 ### 4.2 Sidebar
-Code: `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\src\components\Sidebar.tsx`
+Code: `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\Sidebar.tsx`
 
 - **New clip form**
   - A mode toggle: **Exact range** | **Find moments** ("Claude finds the best moments for you").
@@ -136,7 +135,7 @@ Code: `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\src\components\Si
   - the open clip is highlighted
 
 ### 4.3 Canvas: toolbar and preview
-Code: `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\src\components\Canvas.tsx`
+Code: `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\Canvas.tsx`
 
 - **Toolbar:**
   - left: title "The Worthy Lamb With Pst Catherine · clip 1", **↶ Undo** (yours or Claude's) and the version "v12"
@@ -150,7 +149,7 @@ Code: `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\src\components\Ca
 - The playhead is shared: clicking a word jumps the player, and new effects are added at the playhead.
 
 ### 4.4 Tab panels
-All in `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\src\components\`.
+All in `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\`.
 
 **Captions**: `Transcript.tsx`, `CheckBar.tsx`, `WordList.tsx`
 - **Check bar** (top), for doubtful captions:
@@ -182,7 +181,7 @@ All in `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\src\components\`
   - One word: one big word at a time
   - Boxed: white text on a black bar
   - Neon: glowing caps with emoji
-- The stills are in `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\public\styles\` (`classic.png`, `beast.png`,
+- The stills are in `C:\Users\sajim\Desktop\tetclipper\studio\editor\public\styles\` (`classic.png`, `beast.png`,
   `hormozi.png`, `minimal.png`, `karaoke-pop.png`, `sermon.png`, `one-word.png`, `boxed.png`, `neon.png`).
 - **Controls:**
   - Captions on/off
@@ -241,7 +240,7 @@ All in `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\src\components\`
 - **Cuts list**: every cut with a jump link and "restore".
 
 ### 4.5 Chat (right column)
-Code: `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\src\components\Chat.tsx`
+Code: `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\components\Chat.tsx`
 
 - Header: the title, a **"run scripts"** toggle (lets Claude run helper scripts), and **"new chat"**.
 - Empty state: "Tell Claude how you want this clip. It edits the spec and the preview updates live." It is followed by
@@ -372,12 +371,12 @@ the UI is a view over this one object. **Times are in seconds of the source vide
 followed by the source range minus the cuts.
 
 - **Source of truth (zod):**
-  - `C:\Users\sajim\Desktop\clipper\publikclip\studio\composition\src\spec.ts`
+  - `C:\Users\sajim\Desktop\tetclipper\studio\composition\src\spec.ts`
 - **JSON Schema** (generated):
-  - `C:\Users\sajim\Desktop\clipper\publikclip\studio\composition\spec.schema.json`
-  - a copy for the Python side: `C:\Users\sajim\Desktop\clipper\publikclip\pipeline\tetclipper_pipeline\spec\spec.schema.json`
+  - `C:\Users\sajim\Desktop\tetclipper\studio\composition\spec.schema.json`
+  - a copy for the Python side: `C:\Users\sajim\Desktop\tetclipper\pipeline\tetclipper_pipeline\spec\spec.schema.json`
 - **Output timeline maths** (cuts, intro, frames):
-  - `C:\Users\sajim\Desktop\clipper\publikclip\studio\composition\src\timeline.ts`
+  - `C:\Users\sajim\Desktop\tetclipper\studio\composition\src\timeline.ts`
 
 | Field | What it is | Edited in |
 |---|---|---|
@@ -458,7 +457,7 @@ Each clip folder `C:\Users\sajim\.tetclipper\jobs\<job id>\studio\clip_NN\` hold
 ## 8. Current visual language
 
 The "editing bay" theme: near-black panels, warm off-white text and a single **amber accent**. Inter at 14 px, 8 px radius.
-Tokens from `C:\Users\sajim\Desktop\clipper\publikclip\studio\editor\src\styles.css`:
+Tokens from `C:\Users\sajim\Desktop\tetclipper\studio\editor\src\styles.css`:
 
 ```css
 --bg:        #0e0f11;   /* app background */
@@ -485,7 +484,7 @@ and the dark stage. Class names in use: `.studio`, `.center`, `.canvas`, `.toolb
 ## 9. Where everything lives
 
 ```
-C:\Users\sajim\Desktop\clipper\publikclip\
+C:\Users\sajim\Desktop\tetclipper\
 ├─ README.md
 ├─ docs\SYSTEM.md                       ← this brief
 ├─ studio\
@@ -539,7 +538,7 @@ C:\Users\sajim\Desktop\clipper\publikclip\
       └─ delivery\                      ← Telegram
 ```
 
-**Server commands the UI calls** (`invoke(name, args)` → `POST /api/<name>`, in `server\studio.py`):
+**Server commands the UI calls** (`invoke(name, args)` → `POST /api/cmd/<name>`, in `server\studio.py`):
 
 | Group | Commands |
 |---|---|
@@ -571,14 +570,14 @@ Online, the same layout lives per user at `/data/users/<name>/` on the Modal vol
 The server is usually already running at **http://localhost:8765/studio/**. To start it:
 
 ```powershell
-cd C:\Users\sajim\Desktop\clipper\publikclip\pipeline
+cd C:\Users\sajim\Desktop\tetclipper\pipeline
 uv run tetclipper serve          # → http://localhost:8765/studio/
 ```
 
 For live-reloading UI work, run Vite next to it. It proxies `/api` and `/files` to the server on port 8765:
 
 ```powershell
-cd C:\Users\sajim\Desktop\clipper\publikclip\studio\editor
+cd C:\Users\sajim\Desktop\tetclipper\studio\editor
 npm run dev                      # → http://localhost:5173/studio/
 ```
 

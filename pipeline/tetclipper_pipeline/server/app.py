@@ -1,8 +1,7 @@
 """Web server: the Studio editor's API, plus the pipeline commands it shells out to.
 
 The Studio editor (studio/editor, served at /studio/) talks to this:
-  POST /api/cmd/<name>   one command, JSON args in, JSON out (400 + text on error,
-                         mirroring a rejected Tauri invoke)
+  POST /api/cmd/<name>   one command, JSON args in, JSON out (400 + text on error)
   GET  /api/events       Server-Sent Events: every `tetclipper --jsonl` line
                          plus spec changes and chat streaming
   GET  /files?path=...   a file under TETCLIPPER_HOME (byte ranges for <video>)

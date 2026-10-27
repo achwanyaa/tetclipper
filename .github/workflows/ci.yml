@@ -3,7 +3,7 @@ name: ci
 
 on:
   push:
-    branches: [main, web-fork]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
