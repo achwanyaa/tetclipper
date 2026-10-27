@@ -107,16 +107,19 @@ def load_model(model_name: str):
     return WhisperModel(model_name, device=device, compute_type="float16" if device == "cuda" else "int8")
 
 
-def hear(model, clip, language: str | None, hotwords: str = "", prompt: str | None = None) -> str:
+def hear(model, clip, language: str | None, hotwords: str = "", prompt: str | None = None,
+         timestamps: bool = True) -> str:
     """What `model` hears in `clip` (16 kHz float32 samples), tuned for short
     spans: no carry-over between windows, repetition damped, and at most ~6
     tokens a second (~3 words a second is already fast speech). language
-    None lets the model pick."""
+    None lets the model pick. Models fine-tuned without timestamp tokens
+    (most Hugging Face fine-tunes) need timestamps=False, or they ramble."""
     seconds = len(clip) / 16000
     segments, _ = model.transcribe(
         clip, language=language, beam_size=5, vad_filter=False, condition_on_previous_text=False,
         hotwords=hotwords or None, initial_prompt=prompt, temperature=0.0, no_repeat_ngram_size=3,
         repetition_penalty=1.15, max_new_tokens=min(int(seconds * 6) + 6, 200),  # per 30 s window
+        without_timestamps=not timestamps,
     )
     return tidy(" ".join(s.text.strip() for s in segments).strip())
 

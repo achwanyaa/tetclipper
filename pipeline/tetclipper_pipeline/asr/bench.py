@@ -50,13 +50,18 @@ class Candidate:
     model: str  # faster-whisper size name or Hugging Face repo
     label: str
     convert: bool = False  # a transformers checkpoint: convert to CTranslate2 once
+    # Decode the way the model was trained: Hugging Face fine-tunes learn
+    # without timestamp tokens, and with them they ramble ("…to thoso. ndege").
+    timestamps: bool = True
 
 
 CANDIDATES = {
     "turbo": Candidate("large-v3-turbo", "Whisper large-v3-turbo (today's model)"),
     "large-v3": Candidate("large-v3", "Whisper large-v3 (full size)"),
-    "paza": Candidate("microsoft/paza-whisper-large-v3-turbo", "Microsoft Paza (turbo tuned on Kenyan languages)", convert=True),
-    "jacaranda": Candidate("Jacaranda-Health/ASR-STT", "Jacaranda Health Swahili/English (medium tuned)", convert=True),
+    "paza": Candidate("microsoft/paza-whisper-large-v3-turbo", "Microsoft Paza (turbo tuned on Kenyan languages)",
+                      convert=True, timestamps=False),
+    "jacaranda": Candidate("Jacaranda-Health/ASR-STT", "Jacaranda Health Swahili/English (medium tuned)",
+                           convert=True, timestamps=False),
     # Gated on Hugging Face: needs HF_TOKEN from an account that accepted its terms.
     "sunbird": Candidate("Sunbird/faster-whisper-51-african-languages", "Sunbird (large-v3 tuned on 51 African languages)"),
 }
@@ -250,7 +255,7 @@ def run(segments: list[dict], models: list[str], modes: list[str], hotwords: str
                 t1 = time.monotonic()
                 try:
                     text, error = doubts.hear(model, clip, None if mode == "auto" else mode, hotwords,
-                                              None if mode == "sw" else prompt), None
+                                              None if mode == "sw" else prompt, CANDIDATES[cid].timestamps), None
                 except Exception as err:  # noqa: BLE001 — e.g. a language code faster-whisper doesn't know
                     text, error = "", str(err)
                 rows.append({"model": cid, "mode": mode, "id": seg["id"], "text": text,

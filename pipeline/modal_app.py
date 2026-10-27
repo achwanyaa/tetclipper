@@ -16,9 +16,11 @@ chat needs the Claude Code CLI, so it only works in a local `tetclipper serve`.
 There is one web container in normal use: live events, chat state and the
 spec watcher live in its memory, so a second one would miss them (job
 progress is also kept in progress.json and polled, so it survives that).
-max_containers=2 is headroom for deploys only: the old version's container
-lingers while any browser tab holds its SSE stream open, and with a limit of 1
-it kept the new version from starting at all. It stays up while a tab is open
+max_containers=4 is headroom for deploys only: old versions' containers count
+against the limit while a browser tab holds their event stream open (streams
+now end every 10 minutes, so they drain), and when they filled it the new
+version couldn't start at all. Deploys wait for running jobs (see
+_refuse_to_deploy_over_running_jobs). A container stays up while a tab is open
 or a job is running (server/app.py pings TETCLIPPER_PUBLIC_URL), plus
 SCALEDOWN seconds; jobs also checkpoint after every stage.
 """
@@ -148,7 +150,7 @@ def _commit_forever(every: float = 30.0) -> None:
     secrets=[modal.Secret.from_name("tetclipper-web"), modal.Secret.from_name("tetclipper-supabase")],
     timeout=60 * 60,
     scaledown_window=SCALEDOWN,
-    max_containers=2,
+    max_containers=4,
     cpu=8.0,
     memory=16384,
 )
