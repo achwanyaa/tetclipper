@@ -235,21 +235,22 @@ def _log(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
-def _first_pass(ref: str, model, hotwords: str, prompt: str | None):
-    """The first pass's own pipeline (asr/stage.py) around an already-loaded
-    model: whisperX with voice detection, the hint prompt and word list, and
-    no repeat guards. Those guards suit 2-second spans but mangle a sermon's
-    real repetition ("Kuna vitu tunataka sana" twice came back as
-    "vitutunаtaka", with a Cyrillic а to dodge the rule)."""
+def _first_pass(ref: str, hotwords: str, prompt: str | None):
+    """The first pass's own pipeline (asr/stage.py): whisperX with voice
+    detection, the hint prompt and word list, and no repeat guards. Those
+    guards suit 2-second spans but mangle a sermon's real repetition ("Kuna
+    vitu tunataka sana" twice came back as "vitutunаtaka", with a Cyrillic а
+    to dodge the rule). Its `.model` also hears the short spans."""
     from ..compat import patch_speechbrain_lazy_imports
+    from .stage import _point_caches_at_home
 
     patch_speechbrain_lazy_imports()
+    _point_caches_at_home()
     import whisperx
 
     device = config.compute_device()
     return whisperx.load_model(ref, device, compute_type="float16" if device == "cuda" else "int8",
-                               vad_method="silero", asr_options={"initial_prompt": prompt, "hotwords": hotwords or None},
-                               model=model)
+                               vad_method="silero", asr_options={"initial_prompt": prompt, "hotwords": hotwords or None})
 
 
 def run(segments: list[dict], models: list[str], modes: list[str], hotwords: str = "",
@@ -263,10 +264,8 @@ def run(segments: list[dict], models: list[str], modes: list[str], hotwords: str
     for cid in models:
         t0 = time.monotonic()
         try:
-            ref = model_ref(cid)
-            model = doubts.load_model(ref)
-            pipeline = _first_pass(ref, model, hotwords, prompt) if any(
-                s["end"] - s["start"] >= FIRST_PASS_MIN_SEC for s in segments) else None
+            pipeline = _first_pass(model_ref(cid), hotwords, prompt)
+            model = pipeline.model
         except Exception as err:  # noqa: BLE001 — one model failing mustn't sink the test
             _log(f"{cid}: could not load ({err})")
             rows.append({"model": cid, "mode": None, "id": None, "text": "", "secs": 0.0, "error": f"could not load: {err}"})
@@ -282,7 +281,9 @@ def run(segments: list[dict], models: list[str], modes: list[str], hotwords: str
                     if long:
                         if language is None:
                             pipeline.tokenizer = None  # whisperX keeps the last language; detect afresh
-                        out = pipeline.transcribe(clip, batch_size=8, language=language)
+                        # task given every time: on a language change whisperX
+                        # otherwise passes the task on as a token id and fails.
+                        out = pipeline.transcribe(clip, batch_size=8, language=language, task="transcribe")
                         text = " ".join(s["text"].strip() for s in out["segments"]).strip()
                     else:
                         text = doubts.hear(model, clip, language, hotwords, None if mode == "sw" else prompt,
