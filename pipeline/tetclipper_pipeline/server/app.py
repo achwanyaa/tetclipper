@@ -14,6 +14,10 @@ It is a thin proxy: anything heavier than a file read shells out to the
 from __future__ import annotations
 
 import asyncio
+import base64
+import contextvars
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -23,24 +27,58 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from .. import config
+
 PIPELINE_DIR = Path(__file__).resolve().parents[2]
 REPO_DIR = PIPELINE_DIR.parent
-# Set on a hosted deployment: every /api and /files request must carry it
+# Older hosted setup: one shared token on every /api and /files request
 # (Authorization: Bearer … or the pc_token cookie the login screen sets).
 WEB_TOKEN = os.environ.get("TETCLIPPER_WEB_TOKEN") or None
 COOKIE = "pc_token"
+# The online app: TETCLIPPER_AUTH=supabase. Every request carries the user's
+# Supabase access token; each user works in their own workspace.
+AUTH = os.environ.get("TETCLIPPER_AUTH", "").strip().lower()
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
+ADMINS = {e.strip().lower() for e in os.environ.get("TETCLIPPER_ADMINS", "").split(",") if e.strip()}
+# Signs the long-lived media tokens that <video> tags and the event stream use
+# (they can't send headers, and Supabase tokens expire hourly).
+MEDIA_SECRET = (os.environ.get("TETCLIPPER_MEDIA_SECRET") or os.environ.get("SUPABASE_SECRET_KEY") or _secrets_mod.token_hex(32)).encode()
+MEDIA_TTL = 24 * 3600
+USER: ContextVar[dict | None] = ContextVar("tetclipper_user", default=None)
 
 
 def home_dir() -> Path:
+    """The shared home (models, secrets, AI settings). A user's own files live in workspace_dir()."""
     custom = os.environ.get("TETCLIPPER_HOME")
     return Path(custom) if custom else Path.home() / ".tetclipper"
+
+
+def workspace_dir() -> Path:
+    return config.workspace_dir()
+
+
+def current_user() -> dict | None:
+    return USER.get()
+
+
+def is_admin() -> bool:
+    """Everyone is the admin of the desktop app; online, the TETCLIPPER_ADMINS
+    emails and users with app_metadata.role = admin are."""
+    if AUTH != "supabase":
+        return True
+    user = USER.get()
+    return bool(user and user.get("admin"))
 
 
 def _read_json(path: Path, default: Any = None) -> Any:
@@ -95,18 +133,22 @@ def run_cli_json(args: list[str]) -> Any:
 
 
 class Broadcaster:
-    """Fan pipeline events out to every open /api/events stream."""
+    """Fan pipeline events out to the open /api/events streams. Online, each
+    stream belongs to one workspace and only gets that workspace's events."""
 
     def __init__(self) -> None:
-        self.subscribers: set[asyncio.Queue] = set()
+        self.subscribers: dict[asyncio.Queue, str | None] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
 
-    def publish(self, event: dict) -> None:
-        # Called from worker threads.
+    def publish(self, event: dict, workspace: Path | None = None) -> None:
+        # Called from worker threads; the workspace defaults to the caller's.
         if self.loop is None:
             return
-        for q in list(self.subscribers):
-            self.loop.call_soon_threadsafe(q.put_nowait, event)
+        ws = workspace or config.WORKSPACE.get()
+        key = str(ws) if ws else None
+        for q, owner in list(self.subscribers.items()):
+            if owner is None or key is None or owner == key:
+                self.loop.call_soon_threadsafe(q.put_nowait, event)
 
 
 events = Broadcaster()
@@ -114,17 +156,20 @@ events = Broadcaster()
 
 def stream_pipeline(args: list[str]) -> None:
     """Spawn `tetclipper --jsonl <args>` on a thread and broadcast its lines.
-    An `exited` event is published only when no `result` was seen."""
+    An `exited` event is published only when no `result` was seen. The CLI
+    works in the caller's workspace."""
+    ws = config.WORKSPACE.get()
+    env = {**os.environ, "TETCLIPPER_WORKSPACE": str(ws)} if ws else None
 
     def _run() -> None:
         try:
             child = subprocess.Popen(
                 cli_command(["--jsonl", *args]), stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
-                errors="replace", creationflags=_NO_WINDOW,
+                errors="replace", creationflags=_NO_WINDOW, env=env,
             )
         except OSError as err:
-            events.publish({"event": "result", "ok": False, "error": f"could not start pipeline: {err}"})
+            events.publish({"event": "result", "ok": False, "error": f"could not start pipeline: {err}"}, ws)
             return
         saw_result = False
         assert child.stdout is not None
@@ -135,12 +180,12 @@ def stream_pipeline(args: list[str]) -> None:
                 continue
             if isinstance(value, dict):
                 saw_result |= value.get("event") == "result"
-                events.publish(value)
+                events.publish(value, ws)
         code = child.wait()
         if code != 0 and not saw_result:
-            events.publish({"event": "exited", "code": code})
+            events.publish({"event": "exited", "code": code}, ws)
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=contextvars.copy_context().run, args=(_run,), daemon=True).start()
 
 
 # ---------- commands (POST /api/cmd/<name>; Studio's are in server/studio.py) ----------
@@ -227,17 +272,106 @@ def telegram_link() -> Any:
 app = FastAPI(title="tetclipper")
 
 
+# ---- online sign-in (Supabase) ----
+
+_verified: dict[str, tuple[dict, float]] = {}
+
+
+async def _supabase_user(token: str) -> dict | None:
+    """The signed-in user behind a Supabase access token, checked with Supabase
+    itself (so a revoked session stops working) and cached for 5 minutes."""
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    hit = _verified.get(digest)
+    if hit and hit[1] > time.time():
+        return hit[0]
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            res = await client.get(f"{SUPABASE_URL}/auth/v1/user", headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {token}"})
+    except httpx.HTTPError:
+        return None
+    if res.status_code != 200:
+        return None
+    data = res.json()
+    email = (data.get("email") or "").lower()
+    role = (data.get("app_metadata") or {}).get("role")
+    user = {"id": data["id"], "email": email, "admin": email in ADMINS or role == "admin"}
+    if len(_verified) > 500:
+        _verified.clear()
+    _verified[digest] = (user, time.time() + 300)
+    return user
+
+
+def media_token(user: dict) -> str:
+    """mt.<payload>.<sig>: lets <video> tags and the event stream (which can't
+    send headers) reach this user's files for a day."""
+    payload = base64.urlsafe_b64encode(json.dumps({"id": user["id"], "exp": int(time.time()) + MEDIA_TTL}).encode()).decode().rstrip("=")
+    sig = hmac.new(MEDIA_SECRET, payload.encode(), hashlib.sha256).hexdigest()
+    return f"mt.{payload}.{sig}"
+
+
+def _media_user(token: str) -> dict | None:
+    try:
+        _, payload, sig = token.split(".")
+        if not hmac.compare_digest(sig, hmac.new(MEDIA_SECRET, payload.encode(), hashlib.sha256).hexdigest()):
+            return None
+        data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except (ValueError, TypeError):
+        return None
+    return {"id": data["id"], "email": "", "admin": False} if data.get("exp", 0) > time.time() else None
+
+
+_SAFE_ID = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+
+
 @app.middleware("http")
 async def _require_token(request: Request, call_next):
-    # /api/login is how a browser gets the cookie, so it can't require it.
     path = request.url.path
-    protected = path.startswith(("/api/", "/files")) and path != "/api/login"
-    if WEB_TOKEN and protected:
+    public = ("/api/login", "/api/auth-config")
+    protected = path.startswith(("/api/", "/files")) and path not in public and request.method != "OPTIONS"
+    if AUTH == "supabase" and protected:
+        header = request.headers.get("authorization", "")
+        token = header[7:] if header.lower().startswith("bearer ") else request.query_params.get("access_token", "")
+        if token.startswith("mt."):
+            # Media tokens only open the read-only routes that can't send headers.
+            user = _media_user(token) if path in ("/files", "/api/events") else None
+        else:
+            user = await _supabase_user(token) if token else None
+        if not user or not _SAFE_ID.match(user["id"]):
+            return JSONResponse({"error": "auth"}, status_code=401)
+        USER.set(user)
+        config.WORKSPACE.set(home_dir() / "users" / user["id"])
+    elif WEB_TOKEN and protected:
         header = request.headers.get("authorization", "")
         given = header[7:] if header.lower().startswith("bearer ") else request.cookies.get(COOKIE, "")
         if not _secrets_mod.compare_digest(given, WEB_TOKEN):
             return JSONResponse({"error": "auth"}, status_code=401)
     return await call_next(request)
+
+
+@app.get("/api/auth-config")
+async def auth_config() -> dict:
+    """How the browser should sign in: none (desktop), supabase or token."""
+    return {"mode": "supabase" if AUTH == "supabase" else "token" if WEB_TOKEN else "none"}
+
+
+@command
+def me() -> dict:
+    """Who is signed in, whether they're the admin, and their media token."""
+    user = USER.get()
+    return {
+        "mode": "supabase" if AUTH == "supabase" else "none",
+        "user": {"id": user["id"], "email": user["email"]} if user else None,
+        "admin": is_admin(),
+        "media_token": media_token(user) if user else None,
+    }
+
+
+# The Vercel-hosted editor calls this API from another origin.
+_cors = os.environ.get("TETCLIPPER_CORS_ORIGINS")  # a regex, e.g. https://tetclipper(-[a-z0-9-]+)?\.vercel\.app
+if _cors:
+    app.add_middleware(CORSMiddleware, allow_origin_regex=_cors, allow_methods=["*"], allow_headers=["*"], max_age=3600)
 
 
 @app.post("/api/login")
@@ -276,7 +410,8 @@ async def run_command(name: str, request: Request) -> JSONResponse:
 @app.get("/api/events")
 async def stream_events(request: Request) -> StreamingResponse:
     queue: asyncio.Queue = asyncio.Queue()
-    events.subscribers.add(queue)
+    ws = config.WORKSPACE.get()
+    events.subscribers[queue] = str(ws) if ws else None
 
     async def gen():
         try:
@@ -288,17 +423,18 @@ async def stream_events(request: Request) -> StreamingResponse:
                 except asyncio.TimeoutError:
                     yield ": ping\n\n"
         finally:
-            events.subscribers.discard(queue)
+            events.subscribers.pop(queue, None)
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/files")
 async def get_file(path: str, download: int = 0) -> FileResponse:
-    # Only ever serve files inside TETCLIPPER_HOME.
-    home = home_dir().resolve()
+    # Only the user's own workspace, plus the shared music library. The
+    # desktop app's workspace is the whole home.
     file = Path(path).resolve()
-    if home not in file.parents or not file.is_file():
+    roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve()]
+    if not any(root in file.parents for root in roots) or not file.is_file():
         raise HTTPException(404)
     return FileResponse(file, filename=file.name if download else None)
 
@@ -308,7 +444,7 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 @app.post("/api/upload")
 async def upload(request: Request, name: str) -> dict:
-    dest_dir = home_dir() / "uploads"
+    dest_dir = workspace_dir() / "uploads"
     dest_dir.mkdir(parents=True, exist_ok=True)
     stem, ext = os.path.splitext(_SAFE_NAME.sub("_", Path(name).name) or "upload.mp4")
     dest = dest_dir / f"{stem}{ext}"

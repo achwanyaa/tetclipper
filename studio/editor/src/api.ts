@@ -1,44 +1,82 @@
 // Talks to the Python server (pipeline/tetclipper_pipeline/server): one POST
 // per command, one shared SSE stream for every event (pipeline progress,
-// spec changes, chat).
+// spec changes, chat). The desktop app serves the editor itself (same
+// origin); the hosted editor on Vercel reaches the API at VITE_API_URL and
+// sends the user's sign-in token.
 import type { ClipSpecInput } from '@tetclipper/composition'
 
+export const API = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '')
+
+let token: string | null = null // Supabase access token (commands, uploads)
+let mediaToken: string | null = null // long-lived, for <video> and the event stream
+
+/** Called when the user signs in, their token refreshes, or they sign out. */
+export function setAuth(access: string | null, media: string | null) {
+  token = access
+  if (media !== mediaToken) {
+    mediaToken = media
+    if (source) {
+      source.close()
+      source = null
+      if (listeners.size) connect()
+    }
+  }
+}
+
+const authHeaders = (): Record<string, string> => (token ? { Authorization: `Bearer ${token}` } : {})
+const withMedia = (url: string) => (mediaToken ? `${url}${url.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(mediaToken)}` : url)
+
 export async function invoke<T = unknown>(name: string, args: Record<string, unknown> = {}): Promise<T> {
-  const res = await fetch(`/api/cmd/${name}`, {
+  const res = await fetch(`${API}/api/cmd/${name}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(args)
   })
   const text = await res.text()
+  if (res.status === 401) throw new Error('Your session ended. Sign in again.')
   if (!res.ok) throw new Error(text.replace(/^"|"$/g, '') || `${name} failed (${res.status})`)
   return (text ? JSON.parse(text) : null) as T
+}
+
+/** How this server signs people in: none (desktop app), supabase (online) or token. */
+export async function authConfig(): Promise<{ mode: 'none' | 'supabase' | 'token' }> {
+  const res = await fetch(`${API}/api/auth-config`)
+  if (!res.ok) throw new Error(`The tetclipper server didn't answer (${res.status}).`)
+  return res.json()
 }
 
 type Listener = (event: ServerEvent) => void
 const listeners = new Set<Listener>()
 let source: EventSource | null = null
 
+function connect() {
+  source = new EventSource(withMedia(`${API}/api/events`))
+  source.onmessage = (msg) => {
+    try {
+      const event = JSON.parse(msg.data) as ServerEvent
+      listeners.forEach((l) => l(event))
+    } catch {
+      /* ignore malformed lines */
+    }
+  }
+}
+
 /** Subscribe to every server event. Returns the unsubscribe function. */
 export function onEvent(fn: Listener): () => void {
   listeners.add(fn)
-  if (!source) {
-    source = new EventSource('/api/events')
-    source.onmessage = (msg) => {
-      try {
-        const event = JSON.parse(msg.data) as ServerEvent
-        listeners.forEach((l) => l(event))
-      } catch {
-        /* ignore malformed lines */
-      }
-    }
-  }
+  if (!source) connect()
   return () => listeners.delete(fn)
 }
 
 export async function upload(file: File): Promise<string> {
-  const res = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })
+  const res = await fetch(`${API}/api/upload?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file, headers: authHeaders() })
   if (!res.ok) throw new Error(`upload failed (${res.status})`)
   return ((await res.json()) as { path: string }).path
+}
+
+/** A file on the server (under the user's workspace) as a URL the browser can load. */
+export function fileUrl(path: string, download = false): string {
+  return withMedia(`${API}/files?path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`)
 }
 
 const isUrl = (s: string) => /^(https?:|data:|blob:|\/)/.test(s)
@@ -47,7 +85,7 @@ const isUrl = (s: string) => /^(https?:|data:|blob:|\/)/.test(s)
 export function mediaUrl(jobDir: string, src: string): string {
   if (!src || isUrl(src)) return src
   const sep = jobDir.includes('\\') ? '\\' : '/'
-  return `/files?path=${encodeURIComponent(`${jobDir}${sep}${src.split('/').join(sep)}`)}`
+  return fileUrl(`${jobDir}${sep}${src.split('/').join(sep)}`)
 }
 
 /** The spec with every relative asset path resolved for the Player. */

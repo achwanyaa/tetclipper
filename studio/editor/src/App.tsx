@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipSpecInput } from '@tetclipper/composition'
-import { invoke, onEvent, type AiSettings as AiSettingsData, type ClipData, type JobSummary } from './api'
+import { authConfig, invoke, onEvent, setAuth, type AiSettings as AiSettingsData, type ClipData, type JobSummary } from './api'
+import { signOut, useSession } from './auth'
 import { AiSettings } from './components/AiSettings'
 import { Canvas } from './components/Canvas'
 import { Home } from './components/Home'
 import { NewClip, type CutArgs, type FindArgs } from './components/NewClip'
+import { SignIn } from './components/SignIn'
 import { TopBar, type Step } from './components/TopBar'
 import { useTheme } from './theme'
 
@@ -24,8 +26,88 @@ export interface EditorState {
 
 const SAVE_DELAY = 350
 
+interface Me {
+  mode: 'none' | 'supabase'
+  user: { id: string; email: string } | null
+  admin: boolean
+  media_token: string | null
+}
+
+export interface Account {
+  email: string
+  admin: boolean
+}
+
+/** Sign-in gate. The desktop app's server needs no sign-in; the online one
+ *  (Supabase) shows the sign-in screen until there's a session. */
 export function App() {
+  const [mode, setMode] = useState<'loading' | 'none' | 'supabase' | 'token' | 'offline'>('loading')
+  const [offline, setOffline] = useState<string | null>(null)
+  const { session, stage, setStage } = useSession()
+  const [me, setMe] = useState<Me | null>(null)
+  const token = session?.access_token ?? null
+
+  const connect = useCallback(() => {
+    setMode('loading')
+    authConfig()
+      .then((c) => setMode(c.mode))
+      .catch((e) => {
+        setOffline(String(e.message ?? e))
+        setMode('offline')
+      })
+  }, [])
+  useEffect(connect, [connect])
+
+  // Keep the API's tokens current: the access token refreshes hourly; the
+  // media token (videos, live events) lasts a day, so renew it twice a day.
+  useEffect(() => {
+    if (mode !== 'supabase') return
+    if (!token) {
+      setAuth(null, null)
+      setMe(null)
+      return
+    }
+    setAuth(token, me?.media_token ?? null)
+    const refresh = () =>
+      invoke<Me>('me')
+        .then((m) => {
+          setAuth(token, m.media_token)
+          setMe(m)
+        })
+        .catch(() => undefined)
+    if (!me) refresh()
+    const timer = window.setInterval(refresh, 12 * 3600 * 1000)
+    return () => window.clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, token])
+
+  if (mode === 'loading' || (mode === 'supabase' && (stage === 'loading' || (stage === 'signed-in' && !me)))) {
+    return (
+      <div className="splash">
+        <b>Connecting…</b>
+        <span className="muted">The cloud is waking up. This takes a few seconds after a quiet spell.</span>
+      </div>
+    )
+  }
+  if (mode === 'offline') {
+    return (
+      <div className="splash">
+        <b>Can't reach the tetclipper server</b>
+        <span className="muted">{offline}</span>
+        <button className="tonal" onClick={connect}>
+          Try again
+        </button>
+      </div>
+    )
+  }
+  if (mode === 'supabase' && stage === 'set-password') return <SignIn setPasswordMode onPasswordSet={() => setStage('signed-in')} />
+  if (mode === 'supabase' && stage !== 'signed-in') return <SignIn />
+  return <Studio account={me?.user ? { email: me.user.email, admin: me.admin } : null} onSignOut={mode === 'supabase' ? signOut : undefined} />
+}
+
+function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: () => void }) {
   const theme = useTheme()
+  const isAdmin = !account || account.admin
   const [screen, setScreen] = useState<'home' | 'new'>('home')
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -68,8 +150,8 @@ export function App() {
 
   useEffect(refreshJobs, [refreshJobs])
   useEffect(() => {
-    invoke<AiSettingsData>('ai_settings_get').then(setAi).catch(() => undefined)
-  }, [])
+    if (isAdmin) invoke<AiSettingsData>('ai_settings_get').then(setAi).catch(() => undefined)
+  }, [isAdmin])
   useEffect(() => {
     if (open) loadClip(open.jobId, open.clip)
     else {
@@ -189,6 +271,8 @@ export function App() {
         theme={theme}
         engine={ai ? (ai.providers.find((p) => p.id === ai.provider)?.kind === 'cli' ? 'Claude Code' : ai.model) : null}
         onAi={() => setAiOpen(true)}
+        account={account}
+        onSignOut={onSignOut}
         onHome={goHome}
         onOpen={(jobId, clip) => setOpen({ jobId, clip })}
         onUndo={undo}

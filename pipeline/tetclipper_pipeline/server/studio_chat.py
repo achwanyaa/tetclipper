@@ -12,6 +12,7 @@ Replies stream as {"event": "studio-chat", job_id, clip, kind: text|delta|tool|d
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import shutil
@@ -363,4 +364,5 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
                 _busy.discard(key)
             emit("done", error=error)
 
-    threading.Thread(target=work_api if use_api else work, daemon=True).start()
+    # Run in a copy of the caller's context: the user's workspace comes along.
+    threading.Thread(target=contextvars.copy_context().run, args=(work_api if use_api else work,), daemon=True).start()

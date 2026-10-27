@@ -19,16 +19,29 @@ from __future__ import annotations
 
 import os
 import sys
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# The hosted app gives each signed-in user a private workspace, TETCLIPPER_HOME/
+# users/<id>/, for their jobs, uploads and job database. Models, binaries,
+# secrets, the music library and the word list stay shared at TETCLIPPER_HOME.
+# The web server sets WORKSPACE per request; a CLI it spawns gets
+# TETCLIPPER_WORKSPACE. Unset (desktop, CLI), the workspace is the home itself.
+WORKSPACE: ContextVar[Path | None] = ContextVar("tetclipper_workspace", default=None)
 
 
 def home_dir() -> Path:
     return Path(os.environ.get("TETCLIPPER_HOME", str(Path.home() / ".tetclipper")))
 
 
+def workspace_dir() -> Path:
+    ws = WORKSPACE.get() or os.environ.get("TETCLIPPER_WORKSPACE")
+    return Path(ws) if ws else home_dir()
+
+
 def jobs_dir() -> Path:
-    return home_dir() / "jobs"
+    return workspace_dir() / "jobs"
 
 
 def bin_dir() -> Path:
@@ -40,7 +53,7 @@ def models_dir() -> Path:
 
 
 def db_path() -> Path:
-    return home_dir() / "db.sqlite3"
+    return workspace_dir() / "db.sqlite3"
 
 
 def compute_device() -> str:
@@ -60,7 +73,7 @@ def compute_device() -> str:
 
 def ensure_home() -> Path:
     root = home_dir()
-    for d in (root, jobs_dir(), bin_dir(), models_dir()):
+    for d in (root, workspace_dir(), jobs_dir(), bin_dir(), models_dir()):
         d.mkdir(parents=True, exist_ok=True)
     return root
 

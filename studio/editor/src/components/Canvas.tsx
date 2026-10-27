@@ -11,7 +11,7 @@ import {
   sourceTimeAt,
   type ClipSpecInput
 } from '@tetclipper/composition'
-import { invoke, resolveForPlayer, type ClipData } from '../api'
+import { fileUrl, invoke, resolveForPlayer, type ClipData } from '../api'
 import type { EditorState, Run } from '../App'
 import { ClaudeBar } from './ClaudeBar'
 import { EffectsPanel } from './EffectsPanel'
@@ -208,7 +208,7 @@ function RenderFooter({ data, run, onRender, setError }: { data: ClipData; run: 
   const latest = data.history[data.history.length - 1]?.version ?? 0
   const r = data.render
   const fresh = !!r && r.spec_version === latest
-  const download = r ? `/files?path=${encodeURIComponent(r.output)}&download=1` : ''
+  const download = r ? fileUrl(r.output, true) : ''
 
   const telegram = (
     <button

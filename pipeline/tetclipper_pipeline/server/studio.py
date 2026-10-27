@@ -17,7 +17,7 @@ from typing import Any
 
 from ..spec import store
 from . import agent, studio_chat
-from .app import CommandError, _read_json, _SAFE_NAME, command, events, home_dir, stream_pipeline
+from .app import CommandError, _read_json, _SAFE_NAME, command, events, home_dir, is_admin, stream_pipeline, workspace_dir
 
 STUDIO_DIST = Path(os.environ.get("TETCLIPPER_STUDIO_DIST") or Path(__file__).resolve().parents[3] / "studio" / "editor" / "dist")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -25,7 +25,7 @@ AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 
 
 def _job_dir(job_id: str) -> Path:
-    job_dir = home_dir() / "jobs" / Path(job_id).name
+    job_dir = workspace_dir() / "jobs" / Path(job_id).name
     if not job_dir.is_dir():
         raise CommandError(f"no job {job_id}")
     return job_dir
@@ -37,8 +37,9 @@ def _title(job_dir: Path) -> str:
 
 
 def _publish_spec(job_dir: Path, clip: int, spec: dict, source: str) -> None:
+    # job_dir is <workspace>/jobs/<id>: only that workspace's browsers get it.
     events.publish({"event": "spec", "job_id": job_dir.name, "clip": clip, "spec": spec, "source": source,
-                    "history": store.history(job_dir, clip)[-1:]})
+                    "history": store.history(job_dir, clip)[-1:]}, job_dir.parents[1])
 
 
 # ---------- live watcher: Claude edits spec.json directly ----------
@@ -102,7 +103,7 @@ watcher = _Watcher()
 @command
 def studio_jobs() -> list[dict]:
     """Every job with Studio clips, newest first."""
-    root = home_dir() / "jobs"
+    root = workspace_dir() / "jobs"
     out = []
     for job_dir in sorted(root.iterdir() if root.is_dir() else [], reverse=True):
         clips = store.list_clips(job_dir)
@@ -221,8 +222,8 @@ def studio_attach(jobId: str, clip: int, path: str) -> dict:
     clip's assets/; returns its spec src."""
     job_dir = _job_dir(jobId)
     src = Path(path).resolve()
-    home = home_dir().resolve()
-    if home not in src.parents or not src.is_file():
+    roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve()]  # own uploads or a library track
+    if not any(root in src.parents for root in roots) or not src.is_file():
         raise CommandError("upload not found")
     if src.suffix.lower() not in IMAGE_EXTS | AUDIO_EXTS:
         raise CommandError("Use an image (JPG, PNG, WebP, GIF) or audio (MP3, WAV, M4A, OGG, FLAC).")
@@ -305,7 +306,8 @@ def studio_stutters(jobId: str, clip: int, fillers: bool = False, apply: bool = 
 def studio_settings(allow_scripts: bool | None = None) -> dict:
     """Studio preferences (~/.tetclipper/studio.json). allow_scripts lets the
     chat's Claude run Python/Node scripts — off by default."""
-    path = home_dir() / "studio.json"
+    path = workspace_dir() / "studio.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
     data = _read_json(path) or {}
     if allow_scripts is not None:
         data["allow_scripts"] = bool(allow_scripts)
@@ -368,7 +370,8 @@ def studio_chat_send(jobId: str, clip: int, message: str, context: dict | None =
         return saved
 
     try:
-        studio_chat.send(job_dir, clip, _title(job_dir), message.strip(), context, events.publish, on_turn_end,
+        studio_chat.send(job_dir, clip, _title(job_dir), message.strip(), context,
+                         lambda event: events.publish(event, job_dir.parents[1]), on_turn_end,
                          allow_scripts=studio_settings()["allow_scripts"], save_spec=save_spec)
     except RuntimeError as err:
         raise CommandError(str(err)) from err
@@ -381,14 +384,21 @@ def studio_chat_reset(jobId: str, clip: int) -> None:
 
 # ---------- AI model (admin): provider, model and API key for every user ----------
 
+def _admin_only() -> None:
+    if not is_admin():
+        raise CommandError("Only the admin can change the AI model.")
+
+
 @command
 def ai_settings_get() -> dict:
+    _admin_only()
     return agent.public_settings()
 
 
 @command
 def ai_settings_save(provider: str, model: str = "", key: str | None = None, clear_key: bool = False,
                      base_url: str | None = None, price_in: float | None = None, price_out: float | None = None) -> dict:
+    _admin_only()
     try:
         return agent.save_settings(provider, model, key, clear_key, base_url, price_in, price_out)
     except ValueError as err:
@@ -397,6 +407,7 @@ def ai_settings_save(provider: str, model: str = "", key: str | None = None, cle
 
 @command
 def ai_models(provider: str, key: str | None = None, base_url: str | None = None) -> list[str]:
+    _admin_only()
     try:
         return agent.list_models(provider, key, base_url)
     except ValueError as err:
@@ -407,4 +418,5 @@ def ai_models(provider: str, key: str | None = None, base_url: str | None = None
 
 @command
 def ai_test(provider: str, model: str, key: str | None = None, base_url: str | None = None) -> dict:
+    _admin_only()
     return agent.test(provider, model, key, base_url)

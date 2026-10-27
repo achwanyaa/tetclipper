@@ -16,13 +16,16 @@ interface Props {
   theme: { toggle: () => void }
   engine: string | null
   onAi: () => void
+  account: { email: string; admin: boolean } | null
+  onSignOut?: () => void
   onHome: () => void
   onOpen: (jobId: string, clip: number) => void
   onUndo: () => void
 }
 
-export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme, engine, onAi, onHome, onOpen, onUndo }: Props) {
+export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme, engine, onAi, account, onSignOut, onHome, onOpen, onUndo }: Props) {
   const [picker, setPicker] = useState(false)
+  const [menu, setMenu] = useState(false)
   const job = open ? jobs.find((j) => j.id === open.jobId) : undefined
   const at = step ? STEPS.indexOf(step) : -1
 
@@ -76,6 +79,37 @@ export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme,
       <button className="icon" title={`Switch to ${document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'} theme`} onClick={theme.toggle}>
         ◐
       </button>
+      {account && (
+        <button className="avatar" title={account.email} onClick={() => setMenu((m) => !m)}>
+          {account.email[0]?.toUpperCase() ?? '?'}
+        </button>
+      )}
+
+      {menu && account && (
+        <>
+          <div className="backdrop" onClick={() => setMenu(false)} />
+          <div className="menu" style={{ right: 16, width: 300 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16 }}>
+              <span className="avatar" style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {account.email[0]?.toUpperCase()}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>{account.email}</div>
+                <div className="small muted">{account.admin ? 'Admin' : 'Editor'}</div>
+              </div>
+            </div>
+            <button
+              style={{ width: '100%', justifyContent: 'flex-start', border: 'none', borderTop: '1px solid var(--ln)', borderRadius: 0, height: 46, padding: '0 16px', color: 'var(--mu)' }}
+              onClick={() => {
+                setMenu(false)
+                onSignOut?.()
+              }}
+            >
+              Log out
+            </button>
+          </div>
+        </>
+      )}
 
       {picker && open && (
         <>

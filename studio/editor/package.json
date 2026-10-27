@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@remotion/player": "4.0.535",
+    "@supabase/supabase-js": "^2.118.0",
     "@tetclipper/composition": "0.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
