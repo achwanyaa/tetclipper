@@ -11,8 +11,8 @@ Claude Design, which will design the online UI.
 
 ## 0. What we want back from Claude Design
 
-1. **The new online screens** in section 5: login, account menu, video source (Google Drive / upload), the AI model switch
-   with per-message cost, the usage view, and later a Publish panel.
+1. **The new online screens** in section 5: login, account menu, video source (Google Drive / upload), Save to Drive,
+   the AI model switch with per-message cost, the usage view, and the one-click Post panel (built later, designed now).
 2. **A refresh of the existing Studio screens** in section 4. Keep the structure, the tools and the live video preview.
    Improve hierarchy, density, states and polish so it feels like a professional editing bay, not a developer tool.
 3. **All states:** for every screen, its empty, loading, progress, error and success states (section 4.7 lists what exists
@@ -28,6 +28,10 @@ composition. The UI only chooses and tunes it.
 
 ## 1. What tetclipper is
 
+**In one line:** an online video editing platform, driven by the Claude API on a cheap model (Haiku 5.5). Users log in
+with Supabase, and the frontend runs on Vercel. Videos come in from Google Drive and finished clips go back to Google
+Drive. Later, one click posts a clip to several selected social platforms through a posting service.
+
 tetclipper is a **chat-driven studio that turns long sermon and talk videos into vertical 9:16 clips** for TikTok,
 Instagram Reels and YouTube Shorts. Think of it as Claude Design for video:
 
@@ -42,12 +46,12 @@ Instagram Reels and YouTube Shorts. Think of it as Claude Design for video:
   - **By chatting with Claude** in a sidebar: "use sermon captions and put them a bit higher", "remove the dead air", "add
     a title card for the first 3 seconds". Claude edits the spec and the preview updates live while you watch.
 - Every change, yours or Claude's, is one **undo step**.
-- When it looks right you press **Render**. The cloud renders the final MP4 (about 1 minute for a 2-minute clip). You
-  **download** it or send it to **Telegram**.
-- Later: **publish** to the social platforms with one click, with a caption written per platform.
+- When it looks right you press **Render**. The cloud renders the final MP4 (about 1 minute for a 2-minute clip) and you
+  **save it back to Google Drive**. Download and Telegram stay as extras.
+- Later: **post** it to several selected social platforms with one click, with a caption written per platform.
 
-**Who uses it:** at most **5 people**, each with their own login and their own private workspace. The owner adds the
-accounts; there is no public sign-up, no teams and no billing. The speakers are Kenyan preachers, so speech mixes
+**Who uses it:** at most **5 people**, each with their own login and their own private workspace. Logins are Supabase
+accounts (email and password) that the owner invites; there is no public sign-up, no teams and no billing. The speakers are Kenyan preachers, so speech mixes
 **English, Swahili and Sheng**. The speech model is weakest exactly there, so the UI must make doubtful captions easy to
 find and fix (section 4.4).
 
@@ -57,12 +61,14 @@ find and fix (section 4.4).
 
 | | Today (local) | Online (what we're building) |
 |---|---|---|
-| Where the server runs | the owner's PC (`tetclipper serve`) | Modal (serverless cloud), a small CPU web container |
-| Video source | a YouTube link plus a range, downloaded on the PC | **Google Drive** (Google Picker) or **upload** from the computer |
+| Frontend (this UI) | served by the local server at `/studio/` | **Vercel**: the same React app, built as a static site |
+| Login | none | **Supabase Auth**: email and password, invite-only |
+| API server | the owner's PC (`tetclipper serve`) | Modal (serverless cloud), a small CPU web container that checks the Supabase login on every request |
+| Video source | a YouTube link plus a range, downloaded on the PC | **Google Drive** (Google Picker) first; **upload** from the computer as a fallback |
 | Heavy work (transcribe, camera, cutout, render) | already on Modal GPUs and CPUs | the same, called directly from the cloud |
-| Chat with Claude | the Claude Code CLI on the owner's PC | a **lean editor agent** on the Claude API: **Haiku 5.5** by default, **Sonnet 5.5** one click away |
+| Chat with Claude | the Claude Code CLI on the owner's PC | a **lean editor agent** on the Claude API: **Haiku 5.5** (the cheapest Claude model) by default, **Sonnet 5.5** one click away |
 | Users | 1, no login | up to 5, **each logs in**, each has a separate workspace |
-| Delivery | Download, Telegram | Download, Telegram; later one-click **Publish** |
+| Delivery | Download, Telegram | **Save to Google Drive**; Download and Telegram as extras; later one-click **posting** through a posting service |
 
 YouTube links are not available online (cloud IPs get bot-blocked); they keep working in the local Studio only.
 
@@ -71,7 +77,7 @@ YouTube links are not available online (cloud IPs get bot-blocked); they keep wo
 ## 3. End-to-end flow
 
 ```
-Log in
+Log in (Supabase: email + password)
   └─ New clip (left sidebar)
        ├─ Source: pick a file from Google Drive, or upload one
        ├─ Mode: "Exact range" (from / to)  or  "Find moments" (optional range, best 3/5/8/12)
@@ -82,13 +88,15 @@ Log in
        ├─ edit by hand (each change saves automatically, one undo step)
        ├─ chat with Claude on the right (it edits the same clip; the preview updates live)
        ├─ check doubtful captions (Swahili/Sheng), teach the word list
-       └─ Render ──► progress % in the toolbar ──► Download · Telegram · (later) Publish
+       └─ Render ──► progress % in the toolbar ──► Save to Drive · Download · Telegram
+                                                    └─ (later) Post ──► pick platforms ──► one click posts to all of them
 ```
 
 Timings to design around:
 - **Analysis:** about 1–3 minutes for a 1-minute range. Find moments on a long video takes longer.
 - **Chat reply:** a few seconds to about 30 seconds. Claude streams short notes ("Cutting 6 pauses…") while it works.
 - **Render:** about 45–60 seconds for a 2-minute clip.
+- **Save to Drive:** a few seconds to a minute (a 2-minute clip is roughly 50–100 MB).
 - **Cutout:** the speaker matte some "behind the speaker" effects need takes about 1–2 minutes and is generated once per
   clip.
 
@@ -277,7 +285,7 @@ Code: `studio/editor/src/components/Chat.tsx`
   - a textarea ("Describe the edit…" / "Claude is editing…"); Enter sends, Shift+Enter adds a new line
   - a toggle "include playhead" / "include 3 selected words", which tells Claude the playhead time and the selection
   - **Send**
-- Error banner today: "Claude Code CLI not found on this machine…". Online this becomes API errors (section 5.4).
+- Error banner today: "Claude Code CLI not found on this machine…". Online this becomes API errors (section 5.5).
 
 ### 4.6 Shared plumbing the UI relies on
 - **Autosave:** every edit is saved about 0.35 s after the last change, with a short reason ("caption colour", "captions:
@@ -305,21 +313,26 @@ Code: `studio/editor/src/components/Chat.tsx`
 
 ## 5. New screens and changes for the online version
 
-### 5.1 Login
-- A username and password form, centered, branded "tetclipper". No sign-up and no "forgot password"; the owner resets
-  passwords.
-- Error: "Wrong username or password." Option: "Keep me signed in".
+### 5.1 Login (Supabase Auth)
+- An email and password form, centered, branded "tetclipper". There is no sign-up link: the owner invites each person by
+  email.
+- **Accept invite:** the invite email opens a "Set your password" page, then lands in the Studio.
+- **Forgot password?** sends a Supabase reset email: "Check your email for a reset link." The link opens a "Set a new
+  password" page.
+- Errors: "Wrong email or password.", "This invite link has expired. Ask the owner for a new one."
+- Sessions stay signed in until the user logs out.
 - Everything else (Studio, files, API) is behind the login.
 
 ### 5.2 Account menu (top of the sidebar or the toolbar)
-- The user's name and initial avatar.
+- The user's name (or email) and initial avatar.
 - This month's AI spend for this user (e.g. "$0.42 this month") and a link to **Usage**.
-- Connected accounts: Google Drive (connected / connect), Telegram chat, and later the social accounts.
+- Connected accounts: Google Drive (connected / connect, the Drive account's email), Telegram chat, and later the
+  social accounts linked through the posting service (section 5.8).
 - **Log out**.
 
 ### 5.3 Video source (replaces the "YouTube link" input)
-- Two choices: **Choose from Google Drive** (opens Google's own Picker in a popup) and **Upload a video** (drag and drop
-  or browse).
+- **Choose from Google Drive** is the main choice: it opens Google's own Picker in a popup. **Upload a video** (drag and
+  drop or browse) is the fallback for files that aren't in Drive.
 - **Drive:**
   - The first time, the user signs in with Google and grants access only to files they pick (scope `drive.file`).
   - After picking, show a **file card**: name, size, duration if known, a "change" link, and the Drive thumbnail if
@@ -336,7 +349,20 @@ Code: `studio/editor/src/components/Chat.tsx`
 - A YouTube link pasted anywhere gets a clear message: "YouTube links work in the desktop version only. Download the video
   to Drive or upload it."
 
-### 5.4 Chat: model switch and cost
+### 5.4 Save to Drive (after a render)
+- After a render, the toolbar's main action becomes **Save to Drive**. Download and Telegram move to secondary buttons
+  or a "⋯" menu.
+- **Where it goes:** by default, a `tetclipper` folder in the user's Drive, created on the first save. "Change folder"
+  opens the Google Picker in folder mode, and the choice is remembered.
+- **File name:** "<video title> – clip N.mp4", editable before saving.
+- **States:** saving (progress bar) → saved ("Saved to Drive · Open in Drive ↗", with the time) → failed (reason and
+  **Retry**).
+- If the clip was edited after its last render, the button reads "Save to Drive (older render)", next to **Render** for
+  the new version, just as Download does today.
+- Optional setting in the account menu: "Save every render to Drive automatically".
+- In the sidebar, a clip that is saved to Drive shows a small Drive mark next to its rendered dot.
+
+### 5.5 Chat: model switch and cost
 - A compact switch in the chat header:
   - **Haiku 5.5**: fast and cheap. The default, for everyday edits.
   - **Sonnet 5.5**: smarter, about 20× the cost. For tricky multi-step edits.
@@ -350,35 +376,43 @@ Code: `studio/editor/src/components/Chat.tsx`
 - When Claude changes the clip, the message shows a short summary of what changed ("6 cuts added · captions → Sermon")
   with an inline **Undo**.
 - Expected cost: Haiku is about **$0.0025 per message** (about $0.03 per finished clip). Sonnet is about **$0.05 per
-  message**.
+  message**. (Claude API prices: Haiku 5.5 is $0.10 / $0.50 per million input / output tokens, Sonnet 5.5 is $2 / $10.)
 
-### 5.5 Usage (a page or a modal from the account menu)
+### 5.6 Usage (a page or a modal from the account menu)
 - Per user, this month: AI spend split by model (chat, find moments); clips analysed; renders.
 - Cloud compute against the **Modal free credit of $30/month**, shared by everyone. This is the owner's concern; show it to
   everyone, or only to the owner.
 - A simple table or bars is enough. It's 5 people.
 
-### 5.6 Admin (owner only, minimal)
-- Users are created from the command line today (`tetclipper user add <name>`). An optional small "Users" page would list
-  up to 5 users with last active, AI spend, reset password and remove.
+### 5.7 Admin (owner only, minimal)
+- Users are invited by email through Supabase. The owner can do it from the Supabase dashboard; an optional small "Users"
+  page would list up to 5 users with email, last active and AI spend, plus **Invite**, resend invite and remove.
 
-### 5.7 Publish panel (later phase; design it now so it has a home)
-- Opens from the toolbar after a render: **Publish**.
-- Connected platforms: **TikTok**, **Instagram Reels**, **YouTube Shorts**, **Facebook Reels**. Each has
-  connect/disconnect and the account name.
-- Per platform, a caption that Claude drafts from the transcript, editable. TikTok gets a caption with hashtags; Instagram
-  gets a caption with hashtags; YouTube gets a title and description; Facebook gets a caption.
-- **Publish to selected** in one click, then per-platform status: queued → uploading → live (with a link) or failed (with
-  a reason).
-- Note for the UI: until each platform approves the app, TikTok posts are private-only and YouTube uploads are private.
-  Show that honestly ("will post as private until approved").
+### 5.8 Post panel (later phase; design it now so it has a home)
+Posting goes through a **posting service** (a third-party API that posts one video to many platforms; not chosen yet).
+tetclipper never talks to the platforms directly.
+- Opens from the toolbar after a render: **Post**. It posts the latest render; if the clip was edited after it, the panel
+  asks for a new render first.
+- **Linked accounts:** each platform is linked once through the posting service's own connect flow (a popup). The panel
+  shows each linked account's name and avatar, and "Link" for the ones that aren't linked.
+- **Platforms:** TikTok, Instagram Reels, YouTube Shorts and Facebook Reels to start, each with a checkbox. Others the
+  service supports can be added later, so the list must grow.
+- **Caption per platform:** Claude drafts it from the transcript, and it stays editable. TikTok and Instagram get a
+  caption with hashtags, YouTube gets a title and description, Facebook gets a caption. Show each platform's character
+  limit.
+- **Post to N platforms** in one click. Then each platform shows its own status: queued → uploading → live (with a link)
+  or failed (with the reason and **Retry**).
+- Nice to have: **Schedule** for a date and time instead of posting now.
+- Leave room for a per-platform note from the service (e.g. "posts as private until the account is verified").
 
-### 5.8 Things that change in existing screens
+### 5.9 Things that change in existing screens
 - The sidebar loses "Analyse on this PC". Jobs and clips belong to the logged-in user only.
 - The empty state becomes: "Choose a video from Drive or upload one, then pick a range."
 - Telegram settings move into the account menu.
-- Tablet support (≥ 1024 px wide, landscape) matters more online. A phone needs only to view clips, download them and
-  later publish; editing on a phone is not required.
+- Tablet support (≥ 1024 px wide, landscape) matters more online. A phone needs only to view clips, save or download
+  them and later post them; editing on a phone is not required.
+- The frontend (Vercel) and the API (Modal) are separate. The first request after a quiet spell can take a few seconds
+  while the API wakes up, so the app needs a calm "Connecting…" state rather than an error.
 
 ---
 
@@ -467,7 +501,7 @@ Each clip folder (on the server, `~/.tetclipper/jobs/<job id>/studio/clip_NN/`, 
 - **Cost-aware AI:** show what each chat message costs, default to the cheap model, and keep the expensive one one click
   away.
 - **Five users and private workspaces.** No sharing between users in this version.
-- **Desktop first** (1280–1920 wide), tablet second (landscape ≥ 1024). Phone: view, download and publish only.
+- **Desktop first** (1280–1920 wide), tablet second (landscape ≥ 1024). Phone: view, save or download, and post only.
 - **Dark only** is fine. It's an editing bay: the video must be the brightest thing on screen.
 
 ---
@@ -492,8 +526,12 @@ Tokens from `studio/editor/src/styles.css`:
 /* stage behind the player: #08090a */
 ```
 
-Feel free to extend the palette (success and info colours, an elevation scale, a type scale), but keep the amber identity
-and the dark stage. Class names in use: `.studio`, `.center`, `.canvas`, `.toolbar`, `.stage`, `.tabs`, `.panel`,
+**There is no design system beyond these tokens.** Font sizes (11–14 px), spacing and about 10 more colours (a success
+green `#5fd38d`, a warning orange `#ff9f43`, the error reds) are written straight into the CSS, and only some radii use
+`--radius`. Buttons, inputs, toggles and chips are plain elements styled globally; there are no shared components. Inter
+is requested but not loaded, so it falls back to the system font. Please define the system as part of this work: colour,
+type, spacing, radius and elevation tokens, plus the base components (button, input, toggle, chip, tab, banner). Keep the
+amber identity and the dark stage. Class names in use: `.studio`, `.center`, `.canvas`, `.toolbar`, `.stage`, `.tabs`, `.panel`,
 `.banner.error`, `.empty`, `.run`, `.bar`, `.jobs`, `.job`, `.clip`, `.score`, `.gallery`, `.style-card`, `.controls`,
 `.fx-group`, `.msg.user`, `.msg.assistant`, `.examples`, `.notes`, `.typing`, `.primary`, `.link`, `.toggle`.
 
@@ -574,15 +612,17 @@ tetclipper/
 | Settings | `studio_settings` |
 | Chat | `studio_chat_send`, `studio_chat_reset` |
 
-The online version adds login/logout, me (the user plus usage), Drive file registration, upload URLs, and the model choice
-on `studio_chat_send`.
+The online version adds: the Supabase session (the frontend signs in with Supabase and sends its token with every API
+call), me (the user plus usage), Drive file registration, upload URLs, save to Drive, the model choice on
+`studio_chat_send`, and later the posting calls.
 
 **Data on disk:** `~/.tetclipper/`:
 - `jobs/<job id>/` for analysis checkpoints and the `studio/clip_NN/` folders
 - the job database
 - the word list
 
-Online, the same layout lives per user at `/data/users/<name>/` on the Modal volume.
+Online, the same layout lives per user at `/data/users/<user id>/` on the Modal volume. User accounts live in
+Supabase.
 
 ---
 
