@@ -39,35 +39,22 @@ def _threaded(work: Callable[[Callable[[str, float, str], None]], dict]) -> Iter
 def analyze(row: dict, start: float | None, end: float | None, captions: str | None,
             stages: list[str] | None = None) -> Iterator[dict]:
     """Run analysis stages for a job whose ingest (media.mp4, audio16k.wav,
-    ingest.json) the PC uploaded. Range mode (start/end given): ASR → diarize →
-    events → camera → clip spec. Find mode (stages given, no range): just those
-    stages (…, candidates); scoring happens on the PC where Claude Code is."""
+    ingest.json) the caller uploaded: ASR → diarize → events by default, or
+    `stages` (find adds candidates). Only the GPU work: the caller adds the
+    clip and has it built by `build_spec` on a CPU container, and scores on
+    its side. start/end/captions are still accepted: an older desktop app
+    sends them, gets no spec back, and builds the clip on the PC instead."""
 
     def work(emit) -> dict:
         from .. import cli
-        from ..edits import manual
         from ..jobs import queue
-        from ..spec import build as spec_build
-        from ..spec import store as spec_store
 
         _use_glossary(row.get("glossary"))
         queue.import_job(row["id"], row["source_type"], row["source"], row["settings_json"], row.get("title"))
         job = queue.get_job(row["id"])
         wanted = stages or ["ingest", "asr", "diarize", "events"]
-        results = queue.run_stages(job, [s for s in cli._stages() if s.name in wanted], emit)  # noqa: SLF001
-        job = queue.get_job(row["id"]) or job
-        if start is None or end is None:
-            return {"job_id": job.id}
-        offset = float(results["ingest"].get("section_offset", 0.0))
-        clips = spec_store.list_clips(job.dir)
-        if clips:
-            idx = clips[0]
-        else:
-            idx = manual.add_range(job, start - offset, end - offset, lambda f, m: emit("spec", f, m),
-                                   caption_preset=captions)["clip_index"]
-        spec_build.build(job.dir, idx, style=captions, emit=lambda f, m: emit("spec", f, m))
-        queue.set_job_status(job.id, "done", None)
-        return {"job_id": job.id, "clip": idx}
+        queue.run_stages(job, [s for s in cli._stages() if s.name in wanted], emit)  # noqa: SLF001
+        return {"job_id": job.id}
 
     return _threaded(work)
 

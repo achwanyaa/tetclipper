@@ -286,7 +286,18 @@ def studio_undo(jobId: str, clip: int) -> dict:
 def studio_info() -> dict:
     from ..cloud import client
 
-    return {"cloud": client.available()}
+    # hosted: the web app has no GPU, so there is no "this machine" to choose.
+    return {"cloud": client.available(), "hosted": client.hosted()}
+
+
+def _where(cloud: bool | None) -> list[str]:
+    """--cloud/--local for the CLI. Online it is always the cloud: the web
+    server has no GPU, whatever an older open tab asks for."""
+    from ..cloud import client
+
+    if client.hosted():
+        return ["--cloud"]
+    return [] if cloud is None else ["--cloud" if cloud else "--local"]
 
 
 @command
@@ -299,9 +310,7 @@ def studio_cut(source: str, start: float, end: float, captions: str | None = Non
         args += ["--captions", captions]
     if language:
         args += ["--language", language]
-    if cloud is not None:
-        args.append("--cloud" if cloud else "--local")
-    stream_pipeline(args)
+    stream_pipeline(args + _where(cloud))
 
 
 @command
@@ -317,9 +326,7 @@ def studio_find(source: str, start: float | None = None, end: float | None = Non
         args += ["--captions", captions]
     if language:
         args += ["--language", language]
-    if cloud is not None:
-        args.append("--cloud" if cloud else "--local")
-    stream_pipeline(args)
+    stream_pipeline(args + _where(cloud))
 
 
 @command

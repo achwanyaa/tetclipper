@@ -313,7 +313,8 @@ def _run_range(job: queue.Job, jsonl: bool, captions: str | None = None, camera:
                cloud: bool = False) -> int:
     """Analyse a range job's slice (no scoring) and build its clip spec, unless
     that exists. Shared by `cut` and `resume` of a range job. With cloud=True
-    only the download runs here; analysis + camera run on a Modal GPU."""
+    only the download runs here: analysis runs on a Modal GPU, the camera on a
+    Modal CPU container (it never uses a GPU)."""
     settings = config.Settings.from_json(json.loads(job.settings_json))
     start, end = settings.section or (0.0, 0.0)
     emit = _progress_printer(jsonl)
@@ -353,7 +354,12 @@ def _run_range(job: queue.Job, jsonl: bool, captions: str | None = None, camera:
                 job, start - offset, end - offset, lambda f, m: emit("spec", f, m),
                 caption_preset=captions, camera_mode=camera,
             )["clip_index"]
-        spec_build.build(job.dir, idx, style=captions, emit=lambda f, m: emit("spec", f, m))
+        if cloud and spec_store.load(job.dir, idx) is None:
+            # The camera never uses a GPU: a CPU container on Modal directs it.
+            from .cloud import client as cloud_client
+
+            cloud_client.build_specs(job.dir, [idx], captions, emit)
+        spec_build.build(job.dir, idx, style=captions, emit=lambda f, m: emit("spec", f, m))  # no-op once built
         entry = {"clip_index": idx, "spec": str(spec_store.spec_path(job.dir, idx))}
     except Exception as err:  # noqa: BLE001 — every failure must reach the app
         failed = queue.get_job(job.id)

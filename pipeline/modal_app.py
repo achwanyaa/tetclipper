@@ -3,15 +3,25 @@
     modal secret create tetclipper-web TETCLIPPER_WEB_TOKEN=<random>
     modal deploy pipeline/modal_app.py        # prints the https URL
 
-Studio (driven from the PC by tetclipper_pipeline/cloud/client.py):
-  analyze  GPU (T4, else L4/A10G): ASR → diarize → events → camera → clip spec for a range
-           whose download/ingest the PC uploaded to the volume
-  render   16 CPUs, node + Chromium: Remotion-renders a clip spec to mp4
+Studio functions (driven by tetclipper_pipeline/cloud/client.py, from a PC or
+from the web app below):
+  analyze       GPU (T4, else L4/A10G): ASR → diarize → events (→ candidates)
+                for a job whose download/ingest was uploaded to the volume
+  second_listen GPU: the Swahili second listen over doubtful caption spans
+  matte         GPU: cut the speaker out of one clip
+  build_spec    CPU: direct the camera and write one clip's spec (the face and
+                speaker models are ONNX on CPU; no GPU needed)
+  render        CPU, node + Chromium: Remotion-renders a clip spec to mp4
 
 Everything mutable (models, jobs, clips, secrets.json, llm-cache) lives on
 the `tetclipper-home` Volume, mounted as TETCLIPPER_HOME. The web endpoint
 serves the built Studio editor (studio/editor/dist) next to the API. Studio
 chat needs the Claude Code CLI, so it only works in a local `tetclipper serve`.
+
+The web app runs on one small CPU container and holds no GPU: an open tab
+keeps it up (its event stream is a request), which on a GPU cost $1.10 an
+hour doing nothing. Its jobs send GPU work to the functions above
+(TETCLIPPER_GPU_FUNCTIONS=1), so a GPU is billed only while a job uses it.
 
 There is one web container in normal use: live events, chat state and the
 spec watcher live in its memory, so a second one would miss them (job
@@ -80,7 +90,8 @@ image = (
     .uv_sync(uv_project_dir=str(HERE), groups=["pipeline", "server"], extras=[], frozen=True)
     .env({
         "TETCLIPPER_HOME": HOME,
-        "TETCLIPPER_DEVICE": "cuda",
+        # No TETCLIPPER_DEVICE: each container picks cuda or cpu by what it has
+        # (config.compute_device), so one image serves GPU and CPU functions.
         # The web shell spawns this instead of `uv run tetclipper` (no uv in the image).
         "TETCLIPPER_CLI": "python -m tetclipper_pipeline.cli",
         "TETCLIPPER_STUDIO_DIST": "/root/studio-dist",
@@ -142,17 +153,22 @@ def _commit_forever(every: float = 30.0) -> None:
 
 @app.function(
     image=image,
-    gpu=GPU,
     volumes={HOME: volume},
     # tetclipper-supabase turns on the online sign-in: TETCLIPPER_AUTH=supabase,
     # SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TETCLIPPER_ADMINS,
     # TETCLIPPER_CORS_ORIGINS, TETCLIPPER_MEDIA_SECRET.
-    secrets=[modal.Secret.from_name("tetclipper-web"), modal.Secret.from_name("tetclipper-supabase")],
+    secrets=[
+        modal.Secret.from_name("tetclipper-web"),
+        modal.Secret.from_name("tetclipper-supabase"),
+        # No GPU here: jobs send their GPU work to the functions below.
+        modal.Secret.from_dict({"TETCLIPPER_GPU_FUNCTIONS": "1"}),
+    ],
     timeout=60 * 60,
     scaledown_window=SCALEDOWN,
     max_containers=4,
-    cpu=8.0,
-    memory=16384,
+    # Requests, not caps: downloads and ffmpeg burst above them and are billed as used.
+    cpu=1.0,
+    memory=2048,
 )
 @modal.concurrent(max_inputs=40)
 @modal.asgi_app()
@@ -177,10 +193,11 @@ def _in_root() -> None:
         sys.path.insert(0, "/root")
 
 
-@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, cpu=8.0, memory=16384)
+# 4 cores: the GPU does the heavy lifting; 8 cost $0.19 more per GPU-hour for nothing.
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, cpu=4.0, memory=16384)
 def analyze(row: dict, start: float | None, end: float | None, captions: str | None = None,
             stages: list[str] | None = None):
-    """Studio range job → clip spec, or analysis stages for `find` (generator of progress events)."""
+    """Analysis stages for a cut or a find: ASR → diarize → events (…) (generator of progress events)."""
     _in_root()
     _mark_deps_synced()
     volume.reload()
@@ -192,7 +209,7 @@ def analyze(row: dict, start: float | None, end: float | None, captions: str | N
         volume.commit()
 
 
-@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=40 * 60, cpu=8.0, memory=16384)
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=40 * 60, cpu=4.0, memory=16384)
 def matte(job_id: str, clip: int, spec: dict):
     """Cut the speaker out of one clip (generator of progress events)."""
     _in_root()
@@ -220,7 +237,7 @@ def second_listen(job_id: str, request: dict) -> list:
     return remote.second_listen(job_id, request)
 
 
-@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, cpu=8.0, memory=16384)
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, cpu=4.0, memory=16384)
 def asr_bench(segments: list, models: list, modes: list, hotwords: str = "", prompt: str | None = None) -> list:
     """The ears test (asr/bench.py): candidate speech models over audio the user checked.
     Converted models stay on the volume (models/ct2) for the next run."""
@@ -238,9 +255,11 @@ def asr_bench(segments: list, models: list, modes: list, hotwords: str = "", pro
         volume.commit()
 
 
-@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=20 * 60, cpu=8.0, memory=8192)
+# CPU only: the camera's face and speaker models are ONNX on CPU, and the
+# second listen over a few 1-5 s spans is quick with int8 Whisper.
+@app.function(image=image, volumes={HOME: volume}, timeout=20 * 60, cpu=4.0, memory=8192)
 def build_spec(job_id: str, clip: int, captions: str | None = None, glossary: dict | None = None) -> dict:
-    """Smart camera + spec for one found moment (mapped across clips by `find`)."""
+    """Smart camera + spec for one clip (a cut's, or each found moment's, in parallel)."""
     _in_root()
     _mark_deps_synced()
     volume.reload()

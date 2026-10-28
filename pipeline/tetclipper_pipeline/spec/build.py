@@ -166,7 +166,9 @@ def find_doubts(job_dir: Path, words: list[dict], scores: dict[int, float], emit
         try:
             from ..cloud import client
 
-            if client.available() and not os.environ.get("MODAL_TASK_ID"):  # on the PC: use the cloud GPU
+            # On a PC or the hosted web app (no GPU): the second_listen GPU
+            # function. Inside a Modal function (build_spec): right here.
+            if client.available() and (client.hosted() or not os.environ.get("MODAL_TASK_ID")):
                 spans = client.second_opinion(job_dir, words, spans, "")
             else:
                 spans = doubts.second_opinion(audio, words, spans, "")

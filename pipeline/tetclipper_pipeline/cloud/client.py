@@ -1,8 +1,12 @@
-"""This PC's side of Studio-on-Modal: push job files to the volume, run the
+"""The caller's side of Studio-on-Modal: push job files to the volume, run the
 deployed function, pull the results back with paths rewritten to this machine.
 
-Needs the `cloud` dependency group (modal) and a logged-in Modal CLI
-(~/.modal.toml), plus `modal deploy pipeline/modal_app.py`.
+Two callers: a PC (needs the `cloud` dependency group and a logged-in Modal
+CLI, ~/.modal.toml) and the hosted web app, which has no GPU of its own and
+sends GPU work here too (TETCLIPPER_GPU_FUNCTIONS=1, set on the `web`
+function only). Either way the functions work in /jobs/<id> on the volume;
+the caller's jobs may live elsewhere (a user's workspace online).
+Needs `modal deploy pipeline/modal_app.py`.
 """
 
 from __future__ import annotations
@@ -21,15 +25,21 @@ Emit = Callable[[str, float, str], None]
 PULL_SKIP = {"media.mp4", "audio16k.wav", "diar_embeddings.npy"}
 
 
+def hosted() -> bool:
+    """The hosted web app: a CPU container whose GPU work all goes to the
+    Modal functions (inside Modal no login is needed)."""
+    return os.environ.get("TETCLIPPER_GPU_FUNCTIONS") == "1"
+
+
 def available() -> bool:
-    """Cloud mode is usable: SDK installed, CLI logged in, not switched off."""
+    """Cloud mode is usable: SDK installed, CLI logged in (or hosted), not switched off."""
     if os.environ.get("TETCLIPPER_CLOUD", "1") == "0":
         return False
     try:
         import modal  # noqa: F401
     except ImportError:
         return False
-    return (Path.home() / ".modal.toml").exists() or bool(os.environ.get("MODAL_TOKEN_ID"))
+    return hosted() or (Path.home() / ".modal.toml").exists() or bool(os.environ.get("MODAL_TOKEN_ID"))
 
 
 def _volume():
@@ -62,12 +72,16 @@ def _remap(value: Any, src_prefix: str, to_path: Callable[[str], str]) -> Any:
 
 
 def to_remote(value: Any) -> Any:
-    local = str(config.home_dir())
-    return _remap(value, local, lambda rest: f"{REMOTE_HOME}/" + rest.replace("\\", "/"))
+    """Local paths → the volume's: this workspace's jobs → /data/jobs, the rest
+    of the home → /data. On a PC the workspace is the home itself; online a
+    user's /data/users/<id>/jobs/<job> is worked on as /data/jobs/<job>."""
+    value = _remap(value, str(config.jobs_dir()), lambda rest: f"{REMOTE_HOME}/jobs/" + rest.replace("\\", "/"))
+    return _remap(value, str(config.home_dir()), lambda rest: f"{REMOTE_HOME}/" + rest.replace("\\", "/"))
 
 
 def to_local(value: Any) -> Any:
-    home = config.home_dir()
+    jobs, home = config.jobs_dir(), config.home_dir()
+    value = _remap(value, f"{REMOTE_HOME}/jobs/", lambda rest: str(jobs.joinpath(*PurePosixPath(rest).parts)))
     return _remap(value, REMOTE_HOME + "/", lambda rest: str(home.joinpath(*PurePosixPath(rest).parts)))
 
 
@@ -138,7 +152,8 @@ def _relay(gen, emit: Emit) -> dict:
 def analyze(job, start: float | None, end: float | None, captions: str | None, emit: Emit,
             stages: list[str] | None = None) -> dict:
     """Job whose ingest ran here → GPU analysis on Modal → results pulled back.
-    Range mode builds the clip spec too; find mode runs just `stages`."""
+    Analysis only (ASR, diarize, events, …): clips are built by `build_specs`,
+    on CPU containers, since directing the camera never uses a GPU."""
     job_dir = Path(job.dir)
     push_files(job_dir, ["ingest.json", "media.mp4", "audio16k.wav"], emit)
     from ..spec import glossary
@@ -154,7 +169,7 @@ def analyze(job, start: float | None, end: float | None, captions: str | None, e
 
 
 def build_specs(job_dir: Path, clips: list[int], captions: str | None, emit: Emit) -> None:
-    """Smart camera + spec for several scored clips, one container each, in parallel."""
+    """Smart camera + spec for several scored clips, one CPU container each, in parallel."""
     job_dir = Path(job_dir)
     push_files(job_dir, ["score.json", "clip_edits.json"], emit)
     emit("spec", -1, f"Directing the camera for {len(clips)} clips in parallel…")
@@ -169,7 +184,8 @@ def build_specs(job_dir: Path, clips: list[int], captions: str | None, emit: Emi
 
 
 def second_opinion(job_dir: Path, words: list[dict], spans: list[dict], hotwords: str) -> list[dict]:
-    """Run the Swahili second listen on a Modal GPU (seconds, vs minutes on a laptop CPU)."""
+    """Run the Swahili second listen on a Modal GPU (seconds, vs minutes on a laptop CPU;
+    the hosted web app has no GPU at all)."""
     job_dir = Path(job_dir)
     try:
         have = {e.path.rsplit("/", 1)[-1] for e in _volume().listdir(f"/jobs/{job_dir.name}")}

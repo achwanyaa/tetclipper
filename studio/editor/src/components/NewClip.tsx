@@ -75,7 +75,8 @@ export function NewClip({ busy, online, onCut, onFind }: Props) {
     (mode === 'range'
       ? !!source.trim() && rangeOk && length >= 3 && length <= 600
       : !!source.trim() && (!rangeGiven || (rangeOk && length >= 60)))
-  const useCloud = cloudOk && cloud
+  // Online the server has no GPU of its own: analysis always runs on the cloud GPU.
+  const useCloud = online || (cloudOk && cloud)
 
   const submit = () => {
     if (!valid || busy) return
@@ -204,7 +205,7 @@ export function NewClip({ busy, online, onCut, onFind }: Props) {
             </div>
           </div>
 
-          {cloudOk && (
+          {cloudOk && !online && (
             <div className="field">
               <span className="label">Analyse on</span>
               <div className="seg">
