@@ -132,3 +132,18 @@ def test_online_jobs_always_go_to_the_cloud(home, monkeypatch):
     studio.studio_find("u", cloud=None)
     assert sent[-2][-1] == "--cloud" and sent[-1][-1] == "--cloud"
     assert studio.studio_info()["hosted"] is True
+
+
+def test_job_db_connections_close(home):
+    """An open db file blocks volume.reload() in a warm Modal container."""
+    import sqlite3
+
+    from tetclipper_pipeline.scoring import constants
+
+    for connect in (queue._connect, constants._connect):
+        with connect() as conn:
+            conn.execute("SELECT 1")
+        with pytest.raises(sqlite3.ProgrammingError):
+            conn.execute("SELECT 1")  # closed
+    job = queue.create_job("url", "u", "{}")
+    assert queue.get_job(job.id).id == job.id  # writes still committed

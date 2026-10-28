@@ -9,9 +9,11 @@ table forms is user-visible in the app.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import time
+from typing import Iterator
 
 from .. import config
 
@@ -44,12 +46,19 @@ CREATE TABLE IF NOT EXISTS scoring_config (
 """
 
 
-def _connect() -> sqlite3.Connection:
+@contextlib.contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
+    """Commits (or rolls back) and closes, like jobs/queue.py's: an open db
+    file blocks volume.reload() in a warm Modal container."""
     config.ensure_home()
     conn = sqlite3.connect(config.db_path(), timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    return conn
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.executescript(SCHEMA)
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def active() -> dict:

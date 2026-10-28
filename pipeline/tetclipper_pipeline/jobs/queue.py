@@ -15,13 +15,14 @@ half-checkpoint that resume would trust.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Iterator
 
 from .. import config
 
@@ -65,12 +66,20 @@ class Job:
         return config.jobs_dir() / self.id
 
 
-def _connect() -> sqlite3.Connection:
+@contextlib.contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
+    """A connection that commits (or rolls back) and then closes. `with conn:`
+    alone never closes it, and a db file left open blocks volume.reload() in a
+    warm Modal container: the next job there failed ("path db.sqlite3 is open")."""
     config.ensure_home()
     conn = sqlite3.connect(config.db_path(), timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    return conn
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.executescript(SCHEMA)
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _row_to_job(row: sqlite3.Row) -> Job:

@@ -193,6 +193,19 @@ def _in_root() -> None:
         sys.path.insert(0, "/root")
 
 
+def _reload() -> None:
+    """See what callers pushed since this container last looked. A warm
+    container reused for the next job can't while something from the last
+    one still holds a volume file open: free it and try once more."""
+    try:
+        volume.reload()
+    except RuntimeError:
+        import gc
+
+        gc.collect()
+        volume.reload()
+
+
 # 4 cores: the GPU does the heavy lifting; 8 cost $0.19 more per GPU-hour for nothing.
 @app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, cpu=4.0, memory=16384)
 def analyze(row: dict, start: float | None, end: float | None, captions: str | None = None,
@@ -200,7 +213,7 @@ def analyze(row: dict, start: float | None, end: float | None, captions: str | N
     """Analysis stages for a cut or a find: ASR → diarize → events (…) (generator of progress events)."""
     _in_root()
     _mark_deps_synced()
-    volume.reload()
+    _reload()
     from tetclipper_pipeline.cloud import remote
 
     try:
@@ -214,7 +227,7 @@ def matte(job_id: str, clip: int, spec: dict):
     """Cut the speaker out of one clip (generator of progress events)."""
     _in_root()
     _mark_deps_synced()
-    volume.reload()
+    _reload()
     from tetclipper_pipeline.cloud import remote
 
     try:
@@ -262,7 +275,7 @@ def build_spec(job_id: str, clip: int, captions: str | None = None, glossary: di
     """Smart camera + spec for one clip (a cut's, or each found moment's, in parallel)."""
     _in_root()
     _mark_deps_synced()
-    volume.reload()
+    _reload()
     from tetclipper_pipeline.cloud import remote
 
     try:
