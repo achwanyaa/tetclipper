@@ -30,8 +30,8 @@ max_containers=4 is headroom for deploys only: old versions' containers count
 against the limit while a browser tab holds their event stream open (streams
 now end every 10 minutes, so they drain), and when they filled it the new
 version couldn't start at all. Deploys wait for running jobs (see
-_refuse_to_deploy_over_running_jobs). A container stays up while a tab is open
-or a job is running (server/app.py pings TETCLIPPER_PUBLIC_URL), plus
+_refuse_to_deploy_over_running_jobs). A container stays up while a tab is in use
+(hidden or idle tabs close their stream) or a job is running (server/app.py pings TETCLIPPER_PUBLIC_URL), plus
 SCALEDOWN seconds; jobs also checkpoint after every stage.
 """
 from __future__ import annotations
@@ -51,6 +51,9 @@ PUBLIC_URL = "https://achwanyatours--tetclipper-web.us-east.modal.run"
 # (a deploy once sat for minutes "waiting to be scheduled on a GPU_T4 worker").
 GPU = os.environ.get("TETCLIPPER_MODAL_GPU", "T4,L4,A10G").split(",")
 SCALEDOWN = 15 * 60
+# Workers bill until they scale down, and each job starts fresh ones anyway, so
+# they leave as soon as the queue is empty (Modal's default is 60 s).
+WORK_SCALEDOWN = 5
 
 app = modal.App("tetclipper")
 volume = modal.Volume.from_name("tetclipper-home", create_if_missing=True)
@@ -207,7 +210,7 @@ def _reload() -> None:
 
 
 # 4 cores: the GPU does the heavy lifting; 8 cost $0.19 more per GPU-hour for nothing.
-@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, cpu=4.0, memory=16384)
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, scaledown_window=WORK_SCALEDOWN, cpu=4.0, memory=16384)
 def analyze(row: dict, start: float | None, end: float | None, captions: str | None = None,
             stages: list[str] | None = None):
     """Analysis stages for a cut or a find: ASR → diarize → events (…) (generator of progress events)."""
@@ -222,7 +225,7 @@ def analyze(row: dict, start: float | None, end: float | None, captions: str | N
         volume.commit()
 
 
-@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=40 * 60, cpu=4.0, memory=16384)
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=40 * 60, scaledown_window=WORK_SCALEDOWN, cpu=4.0, memory=16384)
 def matte(job_id: str, clip: int, spec: dict):
     """Cut the speaker out of one clip (generator of progress events)."""
     _in_root()
@@ -236,7 +239,7 @@ def matte(job_id: str, clip: int, spec: dict):
         volume.commit()
 
 
-@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=10 * 60, cpu=4.0, memory=8192)
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=10 * 60, scaledown_window=WORK_SCALEDOWN, cpu=4.0, memory=8192)
 def second_listen(job_id: str, request: dict) -> list:
     """Swahili second listen over doubtful caption spans ({words, spans, hotwords?, model?})."""
     _in_root()
@@ -250,7 +253,7 @@ def second_listen(job_id: str, request: dict) -> list:
     return remote.second_listen(job_id, request)
 
 
-@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, cpu=4.0, memory=16384)
+@app.function(image=image, gpu=GPU, volumes={HOME: volume}, timeout=60 * 60, scaledown_window=WORK_SCALEDOWN, cpu=4.0, memory=16384)
 def asr_bench(segments: list, models: list, modes: list, hotwords: str = "", prompt: str | None = None) -> list:
     """The ears test (asr/bench.py): candidate speech models over audio the user checked.
     Converted models stay on the volume (models/ct2) for the next run."""
@@ -270,7 +273,7 @@ def asr_bench(segments: list, models: list, modes: list, hotwords: str = "", pro
 
 # CPU only: the camera's face and speaker models are ONNX on CPU, and the
 # second listen over a few 1-5 s spans is quick with int8 Whisper.
-@app.function(image=image, volumes={HOME: volume}, timeout=20 * 60, cpu=4.0, memory=8192)
+@app.function(image=image, volumes={HOME: volume}, timeout=20 * 60, scaledown_window=WORK_SCALEDOWN, cpu=4.0, memory=8192)
 def build_spec(job_id: str, clip: int, captions: str | None = None, glossary: dict | None = None) -> dict:
     """Smart camera + spec for one clip (a cut's, or each found moment's, in parallel)."""
     _in_root()
@@ -284,7 +287,7 @@ def build_spec(job_id: str, clip: int, captions: str | None = None, glossary: di
         volume.commit()
 
 
-@app.function(image=render_image, volumes={HOME: volume}, timeout=15 * 60, cpu=8.0, memory=8192)
+@app.function(image=render_image, volumes={HOME: volume}, timeout=15 * 60, scaledown_window=WORK_SCALEDOWN, cpu=8.0, memory=8192)
 def render_chunk(job_dir: str, clip: int, first: int, last: int) -> bytes:
     """One silent chunk of a clip render (fanned out by `render`)."""
     _in_root()
@@ -294,7 +297,7 @@ def render_chunk(job_dir: str, clip: int, first: int, last: int) -> bytes:
     return remote.render_chunk(job_dir, clip, first, last)
 
 
-@app.function(image=render_image, volumes={HOME: volume}, timeout=30 * 60, cpu=4.0, memory=8192)
+@app.function(image=render_image, volumes={HOME: volume}, timeout=30 * 60, scaledown_window=WORK_SCALEDOWN, cpu=4.0, memory=8192)
 def render(job_dir: str, clip: int):
     """Remotion-render one clip spec in parallel chunks (generator of progress events)."""
     _in_root()

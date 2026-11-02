@@ -530,7 +530,8 @@ async def run_command(name: str, request: Request) -> JSONResponse:
 
 # Each event stream ends after this long and the browser reconnects (Last-Event-ID
 # replays the gap). After a deploy that moves open tabs to the new version
-# instead of leaving them listening to the old container forever.
+# instead of leaving them listening to the old container forever. A browser that
+# closed its stream on purpose (hidden or idle tab) sends the id as `last`.
 STREAM_SEC = 10 * 60
 
 
@@ -540,7 +541,7 @@ async def stream_events(request: Request) -> StreamingResponse:
     ws = config.WORKSPACE.get()
     owner = str(ws) if ws else None
     events.subscribers[queue] = owner
-    backlog = events.missed(request.headers.get("last-event-id"), owner)
+    backlog = events.missed(request.headers.get("last-event-id") or request.query_params.get("last"), owner)
 
     async def gen():
         sent = backlog[-1][0] if backlog else 0

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipSpecInput } from '@tetclipper/composition'
-import { authConfig, invoke, onEvent, setAuth, type AiSettings as AiSettingsData, type ClipData, type JobSummary } from './api'
+import { authConfig, invoke, isAwake, onEvent, onWake, setAuth, setWorking, type AiSettings as AiSettingsData, type ClipData, type JobSummary } from './api'
 import { signOut, useSession } from './auth'
 import { AiSettings } from './components/AiSettings'
 import { Canvas } from './components/Canvas'
@@ -157,8 +157,9 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
   // server, so this works even when a live event never reaches this browser.
   const anyRunning = jobs.some((j) => j.progress?.state === 'running') || ((run?.kind === 'cut' || run?.kind === 'find') && !run.error)
   useEffect(() => {
+    setWorking(anyRunning)
     if (!anyRunning) return
-    const timer = window.setInterval(refreshJobs, 5000)
+    const timer = window.setInterval(() => isAwake() && refreshJobs(), 5000)
     return () => window.clearInterval(timer)
   }, [anyRunning, refreshJobs])
 
@@ -185,6 +186,35 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
       setSpec(null)
     }
   }, [open, loadClip])
+
+  // Back after a pause in the event stream: if the server restarted meanwhile the
+  // gap can't be replayed, so re-read what could have changed.
+  const dataRef = useRef(data)
+  dataRef.current = data
+  useEffect(
+    () =>
+      onWake(async () => {
+        refreshJobs()
+        const cur = openRef.current
+        if (!cur || pending.current) return
+        try {
+          const d = await invoke<ClipData>('studio_clip', { jobId: cur.jobId, clip: cur.clip })
+          const was = dataRef.current
+          const changed =
+            !was ||
+            was.history[was.history.length - 1]?.version !== d.history[d.history.length - 1]?.version ||
+            was.chat.messages.length !== d.chat.messages.length ||
+            was.chat.busy !== d.chat.busy
+          if (changed && !pending.current && openRef.current === cur) {
+            setData(d)
+            setSpec(d.spec)
+          }
+        } catch {
+          /* the next edit or reload will surface it */
+        }
+      }),
+    [refreshJobs]
+  )
 
   // Server events: live spec changes (AI, undo), pipeline progress.
   useEffect(

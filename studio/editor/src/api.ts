@@ -18,7 +18,7 @@ export function setAuth(access: string | null, media: string | null) {
     if (source) {
       source.close()
       source = null
-      if (listeners.size) connect()
+      syncStream()
     }
   }
 }
@@ -50,10 +50,64 @@ export async function authConfig(): Promise<{ mode: 'none' | 'supabase' | 'token
 type Listener = (event: ServerEvent) => void
 const listeners = new Set<Listener>()
 let source: EventSource | null = null
+let lastEventId = ''
+
+// An open event stream keeps the billed web server up, so only hold one while
+// someone is here: not in a hidden tab, not after IDLE_MS without input. The
+// gap is replayed on return; a running job keeps the stream in a visible tab.
+const IDLE_MS = 15 * 60 * 1000
+let lastActive = Date.now()
+let working = false
+let paused = false
+const wakeListeners = new Set<() => void>()
+
+export const isAwake = () => !document.hidden && (working || Date.now() - lastActive < IDLE_MS)
+
+/** Something is running for this user: keep watching it while the tab is visible. */
+export function setWorking(on: boolean) {
+  working = on
+  syncStream()
+}
+
+/** Runs when the stream reopens after a pause, to catch up on anything missed. */
+export function onWake(fn: () => void): () => void {
+  wakeListeners.add(fn)
+  return () => wakeListeners.delete(fn)
+}
+
+function syncStream() {
+  if (!listeners.size) return
+  const awake = isAwake()
+  if (awake && !source) {
+    connect()
+    if (paused) {
+      paused = false
+      wakeListeners.forEach((l) => l())
+    }
+  } else if (!awake && source) {
+    source.close()
+    source = null
+    paused = true
+  }
+}
+
+let watching = false
+function watchActivity() {
+  if (watching) return
+  watching = true
+  const seen = () => {
+    lastActive = Date.now()
+    if (!source) syncStream()
+  }
+  document.addEventListener('visibilitychange', syncStream)
+  for (const name of ['pointerdown', 'pointermove', 'keydown', 'wheel']) window.addEventListener(name, seen, { passive: true })
+  window.setInterval(syncStream, 60 * 1000)
+}
 
 function connect() {
-  source = new EventSource(withMedia(`${API}/api/events`))
+  source = new EventSource(withMedia(`${API}/api/events${lastEventId ? `?last=${encodeURIComponent(lastEventId)}` : ''}`))
   source.onmessage = (msg) => {
+    lastEventId = msg.lastEventId || lastEventId
     try {
       const event = JSON.parse(msg.data) as ServerEvent
       listeners.forEach((l) => l(event))
@@ -66,7 +120,8 @@ function connect() {
 /** Subscribe to every server event. Returns the unsubscribe function. */
 export function onEvent(fn: Listener): () => void {
   listeners.add(fn)
-  if (!source) connect()
+  watchActivity()
+  if (!source) syncStream()
   return () => listeners.delete(fn)
 }
 

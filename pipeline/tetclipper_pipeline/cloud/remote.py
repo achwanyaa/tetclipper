@@ -206,7 +206,9 @@ def _mix_bookends(spec: dict, job_dir: Path, speech: Path, out: Path) -> bool:
     return True
 
 
-def chunk_ranges(total: int, max_chunks: int = 40, min_frames: int = 60) -> list[tuple[int, int]]:
+def chunk_ranges(total: int, max_chunks: int = 40, min_frames: int = 150) -> list[tuple[int, int]]:
+    # Every chunk is a container that has to start: for short clips, fewer and
+    # longer chunks cost less for the same frames, at a slightly slower render.
     size = max(min_frames, -(-total // max_chunks))
     return [(a, min(total, a + size) - 1) for a in range(0, total, size)]
 

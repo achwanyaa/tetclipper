@@ -22,6 +22,12 @@ export function AiBar({ data, editor, canUndo, onUndo }: Props) {
   const [withContext, setWithContext] = useState(true)
   const [history, setHistory] = useState(false)
 
+  // Reloaded from the server (e.g. back from a pause): the server's record wins.
+  useEffect(() => {
+    setMessages(data.chat.messages)
+    setBusy(data.chat.busy)
+  }, [data.chat])
+
   useEffect(
     () =>
       onEvent((ev) => {
