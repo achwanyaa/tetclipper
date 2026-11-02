@@ -17,6 +17,7 @@ rejected with its problems and the model can fix it in the same turn.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -122,6 +123,7 @@ def public_settings() -> dict:
                 "kind": p["kind"],
                 "note": p.get("note"),
                 "key_url": p.get("key_url"),
+                "custom_price": p["kind"] == "openai",
                 "default": p.get("default", ""),
                 "models": p["models"],
                 "key": _mask(s["keys"][pid]) if s["keys"].get(pid) else None,
@@ -237,6 +239,11 @@ def _api_error(err: Exception) -> str:
     return msg[:300]
 
 
+def public_error(text: str) -> str:
+    """An error safe to show any user: the provider's name never reaches the browser."""
+    return re.sub(r"(?i)\b(?:claude[\w.-]*(?: code)?|anthropic)\b", "AI", text)
+
+
 def uses_api() -> bool:
     return PROVIDERS[load_settings()["provider"]]["kind"] != "cli"
 
@@ -299,9 +306,9 @@ TOOLS = [
     },
     {
         "name": "update_spec",
-        "description": "Change top-level spec fields. Object fields (captions, source, intro, music, progressBar) are "
+        "description": "Change top-level spec fields. Object fields (captions, source, intro, outro, music, progressBar) are "
         "merged with what's there; lists (cuts, effects, doubts) and other values are replaced; null clears "
-        "intro or music. The change is validated before it's saved.",
+        "intro, outro or music. The change is validated before it's saved.",
         "schema": {"type": "object", "properties": {"changes": {"type": "object"}}, "required": ["changes"]},
     },
     {
@@ -375,7 +382,7 @@ NOTES = {
     "remove_stutters": "finding stutters…",
 }
 
-MERGE_FIELDS = {"captions", "source", "intro", "music", "progressBar"}
+MERGE_FIELDS = {"captions", "source", "intro", "outro", "music", "progressBar"}
 
 
 class ClipTools:
@@ -503,16 +510,23 @@ class ClipTools:
         return self._save(stutters.apply(spec, found), f"stutters: {len(found['removals'])}")
 
 
-SYSTEM = """You edit ONE vertical (9:16) video clip in tetclipper Studio. The user watches a live
+SYSTEM = """You are tetclipper's AI editor. If asked which model or company is behind you, say you're
+tetclipper's AI and can't share that; never claim to be a different model or deny being an AI.
+You edit ONE vertical (9:16) video clip in tetclipper Studio. The user watches a live
 preview; every edit you save shows up instantly. You change the clip only through the tools.
 
 Clip: "{title}" (job {job_id}, clip {clip}).
 
 The spec (all times are SOURCE seconds, positions in the media file):
 - source {{src, start, end}}: the clip range. Widen or narrow it by changing start/end.
-- intro: null or {{src, duration 0.5–5, fit cover|contain}}, a full-screen still before the clip.
-- music: null or {{src, volume 0–1, duck 0–1, offset, fadeIn, fadeOut, loop}}.
-- cuts [{{start, end}}]: spans removed from the clip. Snap to word boundaries so nothing is clipped.
+- intro, outro: null or {{src, kind image|video, duration 0.5–30, fit cover|contain, volume 0–1, transition}},
+  a full-screen still or video before or after the clip. The user uploads the file in the Intro & outro tab.
+- transition: null (hard cut) or {{type, duration 0.2–2}}. Types: fade, dip-black, dip-white, slide-left, slide-up,
+  zoom, wipe, blur. On intro/outro it runs between them and the video.
+- music: null or {{src, volume 0–1, duck 0–1, offset, end, fadeIn, fadeOut, loop}}. offset and end are the part of
+  the track to use, in track seconds (end null = the track's end); it loops inside that part when loop is true.
+- cuts [{{start, end, transition?}}]: spans removed from the clip. Snap to word boundaries so nothing is clipped.
+  Only give a cut a transition when asked: automatic silence and stutter cuts stay hard.
 - words [{{text, start, end, emphasis?, hidden?}}]: the captions. Fix with edit_words. hidden removes a
   word from the captions only; the audio stays.
 - doubts [{{from, to, reason, alt?}}]: caption spans the speech model may have misheard (word indexes).
@@ -565,7 +579,7 @@ def run_turn(job_dir: Path, clip: int, title: str, prompt: str, history: list[di
     if not key:
         return [], "No API key is set for the AI provider. The admin can add one under AI model.", {}
     system = SYSTEM.format(title=title or job_dir.name, job_id=job_dir.name, clip=clip)
-    tools = ClipTools(job_dir, clip, f"claude: {prompt.splitlines()[-1][:50]}", save_spec)
+    tools = ClipTools(job_dir, clip, f"ai: {prompt.splitlines()[-1][:50]}", save_spec)
     usage = {"in": 0, "out": 0, "cache_write": 0, "cache_read": 0}
     replies: list[str] = []
     error: str | None = None
@@ -614,7 +628,7 @@ def _loop_anthropic(client, model, system, history, prompt, tools: ClipTools, em
                 replies.append(b.text.strip())
                 emit("text", text=b.text.strip())
         if resp.stop_reason == "refusal":
-            return "Claude declined this request."
+            return "The AI declined this request."
         if resp.stop_reason == "pause_turn":
             messages.append({"role": "assistant", "content": resp.content})
             continue

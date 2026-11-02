@@ -4,7 +4,7 @@
 //
 // Every time is in SOURCE seconds — the position in the downloaded media file —
 // so a spec stays valid when the range is widened, narrowed or cut.
-// The output timeline is: [intro still] + (source.start..source.end minus cuts).
+// The output timeline is: [intro] + (source.start..source.end minus cuts) + [outro].
 import { z } from 'zod'
 
 export const SPEC_VERSION = 1
@@ -217,7 +217,28 @@ export const CAMERA_EFFECTS = ['punch-in', 'shake', 'digital-zoom', 'vertigo', '
 /** Effect types drawn between the background and the cut-out speaker. */
 export const BEHIND_EFFECTS = ['wall-text', 'cover', 'orbit', 'frame-break', 'background', 'vertigo'] as const
 
-export const cutSchema = z.object({ start: seconds, end: seconds })
+export const TRANSITIONS = ['fade', 'dip-black', 'dip-white', 'slide-left', 'slide-up', 'zoom', 'wipe', 'blur'] as const
+export const transitionSchema = z.object({
+  type: z.enum(TRANSITIONS),
+  duration: z.number().min(0.2).max(2).default(0.5)
+})
+
+export const cutSchema = z.object({
+  start: seconds,
+  end: seconds,
+  transition: transitionSchema.nullable().default(null) // null = hard cut
+})
+
+// A full-screen still or video before or after the clip. `duration` is its time
+// on screen; a transition overlaps the clip by the transition's length.
+const bookendSchema = z.object({
+  src: z.string(),
+  kind: z.enum(['image', 'video']).default('image'),
+  duration: z.number().min(0.5).max(30).default(2),
+  fit: z.enum(['cover', 'contain']).default('cover'),
+  volume: fraction.default(1), // a video's own sound
+  transition: transitionSchema.nullable().default(null)
+})
 
 export const clipSpecSchema = z.object({
   version: z.literal(SPEC_VERSION).default(SPEC_VERSION),
@@ -229,23 +250,17 @@ export const clipSpecSchema = z.object({
     width: z.number().int().positive().default(1920),
     height: z.number().int().positive().default(1080)
   }),
-  // Full-screen still shown before the clip starts.
-  intro: z
-    .object({
-      src: z.string(),
-      duration: z.number().min(0.5).max(5).default(2),
-      fit: z.enum(['cover', 'contain']).default('cover')
-    })
-    .nullable()
-    .default(null),
+  intro: bookendSchema.nullable().default(null),
+  outro: bookendSchema.nullable().default(null),
   cuts: z.array(cutSchema).default([]),
-  // Music bed under the whole output (intro included). Ducks while anyone speaks.
+  // Music bed under the whole output (intro and outro included). Ducks while anyone speaks.
   music: z
     .object({
       src: z.string(),
       volume: fraction.default(0.25),
       duck: fraction.default(0.35), // multiplier on `volume` while speech plays
       offset: seconds.default(0), // start this far into the track
+      end: seconds.nullable().default(null), // stop here in the track (null = its end); loops within offset..end
       fadeIn: z.number().min(0).max(10).default(1),
       fadeOut: z.number().min(0).max(10).default(1.5),
       loop: z.boolean().default(true)
@@ -304,6 +319,9 @@ export type CropKeyframe = z.infer<typeof cropKeyframeSchema>
 export type Effect = z.infer<typeof effectSchema>
 export type EffectInput = z.input<typeof effectSchema>
 export type Cut = z.infer<typeof cutSchema>
+export type Transition = z.infer<typeof transitionSchema>
+export type TransitionType = (typeof TRANSITIONS)[number]
+export type Bookend = z.infer<typeof bookendSchema>
 export type Doubt = z.infer<typeof clipSpecSchema>['doubts'][number]
 export type Music = NonNullable<z.infer<typeof clipSpecSchema>['music']>
 export type ClipSpec = z.infer<typeof clipSpecSchema>

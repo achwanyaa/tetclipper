@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:names": "node scripts/check-names.mjs"
   },
   "dependencies": {
     "@remotion/player": "4.0.535",

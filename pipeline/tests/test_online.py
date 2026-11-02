@@ -141,3 +141,15 @@ def test_clip_cards_get_a_real_frame_framed_like_the_clip(client, monkeypatch):
     pixel = subprocess.run([exe, "-v", "error", "-i", str(job / "studio" / "clip_00" / "thumb.jpg"), "-vf",
                             "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
     assert pixel[2] > 150 and pixel[0] < 80  # blue: framed where the camera points
+
+
+def test_users_are_never_told_which_ai_answers(client):
+    c, job = client
+    (job / "studio" / "clip_00" / "chat.json").write_text(
+        '{"session_id": null, "messages": [{"role": "assistant", "text": "Done.", "model": "claude-haiku-5-5", "tokens": {"in": 1}, "cost": 0.1}]}',
+        encoding="utf-8",
+    )
+    store.save(job, 0, dict(SPEC), reason="claude: bigger captions")
+    body = cmd(c, "studio_clip", "token-a", jobId="job1", clip=0).text
+    assert "Done." in body and "ai: bigger captions" in body
+    assert "claude" not in body.lower() and "anthropic" not in body.lower()

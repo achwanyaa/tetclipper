@@ -52,10 +52,18 @@
                 "src": {
                   "type": "string"
                 },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "image",
+                    "video"
+                  ],
+                  "default": "image"
+                },
                 "duration": {
                   "type": "number",
                   "minimum": 0.5,
-                  "maximum": 5,
+                  "maximum": 30,
                   "default": 2
                 },
                 "fit": {
@@ -65,6 +73,132 @@
                     "contain"
                   ],
                   "default": "cover"
+                },
+                "volume": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "default": 1
+                },
+                "transition": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "fade",
+                            "dip-black",
+                            "dip-white",
+                            "slide-left",
+                            "slide-up",
+                            "zoom",
+                            "wipe",
+                            "blur"
+                          ]
+                        },
+                        "duration": {
+                          "type": "number",
+                          "minimum": 0.2,
+                          "maximum": 2,
+                          "default": 0.5
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
+                }
+              },
+              "required": [
+                "src"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "outro": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "src": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "image",
+                    "video"
+                  ],
+                  "default": "image"
+                },
+                "duration": {
+                  "type": "number",
+                  "minimum": 0.5,
+                  "maximum": 30,
+                  "default": 2
+                },
+                "fit": {
+                  "type": "string",
+                  "enum": [
+                    "cover",
+                    "contain"
+                  ],
+                  "default": "cover"
+                },
+                "volume": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "default": 1
+                },
+                "transition": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "fade",
+                            "dip-black",
+                            "dip-white",
+                            "slide-left",
+                            "slide-up",
+                            "zoom",
+                            "wipe",
+                            "blur"
+                          ]
+                        },
+                        "duration": {
+                          "type": "number",
+                          "minimum": 0.2,
+                          "maximum": 2,
+                          "default": 0.5
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "required": [
@@ -90,6 +224,42 @@
               "end": {
                 "type": "number",
                 "minimum": 0
+              },
+              "transition": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "fade",
+                          "dip-black",
+                          "dip-white",
+                          "slide-left",
+                          "slide-up",
+                          "zoom",
+                          "wipe",
+                          "blur"
+                        ]
+                      },
+                      "duration": {
+                        "type": "number",
+                        "minimum": 0.2,
+                        "maximum": 2,
+                        "default": 0.5
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
               }
             },
             "required": [
@@ -124,6 +294,18 @@
                   "type": "number",
                   "minimum": 0,
                   "default": 0
+                },
+                "end": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 },
                 "fadeIn": {
                   "type": "number",

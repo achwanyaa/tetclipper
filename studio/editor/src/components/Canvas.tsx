@@ -9,11 +9,13 @@ import {
   clipSpecSchema,
   frameAtSource,
   sourceTimeAt,
-  type ClipSpecInput
+  type ClipSpecInput,
+  type Timeline as TL
 } from '@tetclipper/composition'
 import { fileUrl, invoke, resolveForPlayer, type ClipData } from '../api'
 import type { EditorState, Run } from '../App'
-import { ClaudeBar } from './ClaudeBar'
+import { stopPreview } from '../audioPreview'
+import { AiBar } from './AiBar'
 import { EffectsPanel } from './EffectsPanel'
 import { IntroPanel } from './IntroPanel'
 import { MusicPanel } from './MusicPanel'
@@ -30,9 +32,12 @@ export interface PanelProps {
   update: (next: ClipSpecInput, reason: string) => void
   seek: (sourceTime: number) => void
   setError: (e: string | null) => void
+  timeline: TL | null
+  previewFrame: (frame: number) => void // seek there and play
+  pausePlayer: () => void
 }
 
-const TABS = ['Captions', 'Look', 'Intro', 'Music', 'Effects', 'Trim'] as const
+const TABS = ['Captions', 'Look', 'Intro & outro', 'Music', 'Effects', 'Trim'] as const
 type Tab = (typeof TABS)[number]
 
 interface Props {
@@ -53,7 +58,7 @@ const clock = (frames: number) => {
   return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`
 }
 
-/** Edit step: big live preview, lane timeline and Claude bar on the left;
+/** Edit step: big live preview, lane timeline and AI bar on the left;
  *  the tool inspector with the render/share footer on the right. */
 export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRender, setError, online = false }: Props) {
   const player = useRef<PlayerRef>(null)
@@ -83,7 +88,10 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
       setFrame(e.detail.frame)
       setEditor((s) => ({ ...s, playhead: sourceTimeAt(timeline, e.detail.frame, FPS) }))
     }
-    const onPlay = () => setPlaying(true)
+    const onPlay = () => {
+      stopPreview() // the clip and a track preview never play over each other
+      setPlaying(true)
+    }
     const onPause = () => setPlaying(false)
     p.addEventListener('frameupdate', onFrame)
     p.addEventListener('seeked', onFrame)
@@ -124,7 +132,13 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
     if (f !== null) seekFrame(f)
   }
 
-  const panel: PanelProps = { data, spec, editor, setEditor, update, seek, setError }
+  const previewFrame = (f: number) => {
+    seekFrame(f)
+    player.current?.play()
+  }
+  const pausePlayer = () => player.current?.pause()
+
+  const panel: PanelProps = { data, spec, editor, setEditor, update, seek, setError, timeline, previewFrame, pausePlayer }
   const doubts = parsed?.doubts?.length ?? 0
 
   return (
@@ -164,7 +178,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
 
         {parsed && timeline && <Timeline timeline={timeline} spec={parsed} frame={frame} playhead={editor.playhead} seekFrame={seekFrame} seekSource={seek} />}
 
-        <ClaudeBar data={data} editor={editor} canUndo={data.history.length > 1} onUndo={undo} />
+        <AiBar data={data} editor={editor} canUndo={data.history.length > 1} onUndo={undo} />
       </div>
 
       <aside className="inspector">
@@ -190,7 +204,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
           )}
           {tab === 'Captions' && <Transcript {...panel} />}
           {tab === 'Look' && <StylePanel {...panel} />}
-          {tab === 'Intro' && <IntroPanel {...panel} />}
+          {tab === 'Intro & outro' && <IntroPanel {...panel} />}
           {tab === 'Music' && <MusicPanel {...panel} />}
           {tab === 'Effects' && <EffectsPanel {...panel} />}
           {tab === 'Trim' && <TrimPanel {...panel} />}

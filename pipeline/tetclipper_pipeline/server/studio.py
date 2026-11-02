@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -23,6 +24,7 @@ from .app import CommandError, _read_json, _SAFE_NAME, command, events, home_dir
 STUDIO_DIST = Path(os.environ.get("TETCLIPPER_STUDIO_DIST") or Path(__file__).resolve().parents[3] / "studio" / "editor" / "dist")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
+VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 
 
 THUMB_W, THUMB_H = 360, 640
@@ -110,10 +112,15 @@ def _title(job_dir: Path) -> str:
     return ingest.get("title") or job_dir.name
 
 
+def _public_history(job_dir: Path, clip: int) -> list[dict]:
+    """Version history for the browser; older AI edits were saved as "claude: ..."."""
+    return [{**h, "reason": re.sub(r"(?i)^claude\b", "ai", h["reason"])} for h in store.history(job_dir, clip)]
+
+
 def _publish_spec(job_dir: Path, clip: int, spec: dict, source: str) -> None:
     # job_dir is <workspace>/jobs/<id>: only that workspace's browsers get it.
     events.publish({"event": "spec", "job_id": job_dir.name, "clip": clip, "spec": spec, "source": source,
-                    "history": store.history(job_dir, clip)[-1:]}, job_dir.parents[1])
+                    "history": _public_history(job_dir, clip)[-1:]}, job_dir.parents[1])
 
 
 # ---------- live watcher: Claude edits spec.json directly ----------
@@ -164,9 +171,9 @@ class _Watcher:
                 if validate(spec):
                     continue
                 job_dir = Path(job)
-                store.save(job_dir, clip, spec, reason="claude")
+                store.save(job_dir, clip, spec, reason="ai")
                 self.note(job_dir, clip)
-                _publish_spec(job_dir, clip, spec, "claude")
+                _publish_spec(job_dir, clip, spec, "ai")
 
 
 watcher = _Watcher()
@@ -252,9 +259,9 @@ def studio_clip(jobId: str, clip: int = 0) -> dict:
         "clip": clip,
         "title": _title(job_dir),
         "spec": spec,
-        "history": store.history(job_dir, clip),
-        "chat": {**studio_chat.history(job_dir, clip), "busy": studio_chat.busy(job_dir, clip),
-                 "available": available, "engine": engine, "notice": notice},
+        "history": _public_history(job_dir, clip),
+        "chat": {**studio_chat.public_history(job_dir, clip), "busy": studio_chat.busy(job_dir, clip),
+                 "available": available, "notice": notice},
         "render": render,
     }
 
@@ -268,7 +275,7 @@ def studio_save(jobId: str, clip: int, spec: dict, reason: str = "edit") -> dict
         raise CommandError(str(err)) from err
     watcher.note(job_dir, clip)
     _publish_spec(job_dir, clip, saved, "editor")
-    return {"spec": saved, "history": store.history(job_dir, clip)}
+    return {"spec": saved, "history": _public_history(job_dir, clip)}
 
 
 @command
@@ -279,7 +286,7 @@ def studio_undo(jobId: str, clip: int) -> dict:
         raise CommandError("Nothing to undo.")
     watcher.note(job_dir, clip)
     _publish_spec(job_dir, clip, spec, "undo")
-    return {"spec": spec, "history": store.history(job_dir, clip)}
+    return {"spec": spec, "history": _public_history(job_dir, clip)}
 
 
 @command
@@ -329,17 +336,40 @@ def studio_find(source: str, start: float | None = None, end: float | None = Non
     stream_pipeline(args + _where(cloud))
 
 
+def _asset_kind(path: Path) -> str:
+    suffix = path.suffix.lower()
+    return "image" if suffix in IMAGE_EXTS else "video" if suffix in VIDEO_EXTS else "audio"
+
+
+def _probe_media(path: Path) -> dict:
+    """Length in seconds and whether a media file has sound (empty if unreadable:
+    the browser can still read the length when it loads the file)."""
+    from ..render.ffmpeg_bin import ffprobe
+
+    try:
+        run = subprocess.run(
+            [ffprobe(), "-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=60,
+        )
+        data = json.loads(run.stdout or "{}")
+        return {"duration": float(data.get("format", {}).get("duration") or 0),
+                "hasAudio": any(s.get("codec_type") == "audio" for s in data.get("streams", []))}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {}
+
+
 @command
 def studio_attach(jobId: str, clip: int, path: str) -> dict:
-    """Copy an uploaded image or audio file (or a library track) into the
-    clip's assets/; returns its spec src."""
+    """Copy an uploaded image, video or audio file (or a library track) into the
+    clip's assets/; returns its spec src, what it is and, for media, its length
+    and whether it has sound."""
     job_dir = _job_dir(jobId)
     src = Path(path).resolve()
     roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve()]  # own uploads or a library track
     if not any(root in src.parents for root in roots) or not src.is_file():
         raise CommandError("upload not found")
-    if src.suffix.lower() not in IMAGE_EXTS | AUDIO_EXTS:
-        raise CommandError("Use an image (JPG, PNG, WebP, GIF) or audio (MP3, WAV, M4A, OGG, FLAC).")
+    if src.suffix.lower() not in IMAGE_EXTS | AUDIO_EXTS | VIDEO_EXTS:
+        raise CommandError("Use an image (JPG, PNG, WebP, GIF), a video (MP4, MOV, WebM) or audio (MP3, WAV, M4A, OGG, FLAC).")
     assets = store.clip_dir(job_dir, clip) / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     stem = _SAFE_NAME.sub("_", src.stem) or "image"
@@ -349,7 +379,10 @@ def studio_attach(jobId: str, clip: int, path: str) -> dict:
         dest = assets / f"{stem}-{n}{src.suffix.lower()}"
         n += 1
     shutil.copyfile(src, dest)
-    return {"src": dest.relative_to(job_dir).as_posix()}
+    out: dict[str, Any] = {"src": dest.relative_to(job_dir).as_posix(), "kind": _asset_kind(dest)}
+    if out["kind"] != "image":
+        out.update(_probe_media(dest))
+    return out
 
 
 @command
@@ -390,7 +423,7 @@ def studio_dead_air(jobId: str, clip: int, mode: str = "natural", fillers: bool 
         saved = store.save(job_dir, clip, silence.apply(spec, found), reason=reason)
         watcher.note(job_dir, clip)
         _publish_spec(job_dir, clip, saved, "editor")
-        out.update(spec=saved, history=store.history(job_dir, clip))
+        out.update(spec=saved, history=_public_history(job_dir, clip))
     return out
 
 
@@ -469,17 +502,17 @@ def studio_chat_send(jobId: str, clip: int, message: str, context: dict | None =
     watcher.watch(job_dir, clip)
 
     def on_turn_end() -> list[str]:
-        spec, problems = store.sync_from_disk(job_dir, clip, reason=f"claude: {message.strip()[:60]}")
+        spec, problems = store.sync_from_disk(job_dir, clip, reason=f"ai: {message.strip()[:60]}")
         watcher.note(job_dir, clip)
         if spec is not None:
-            _publish_spec(job_dir, clip, spec, "claude")
+            _publish_spec(job_dir, clip, spec, "ai")
         return problems
 
     def save_spec(spec: dict, reason: str) -> dict:
         """API agent edits: validated by store.save (ValueError on problems)."""
         saved = store.save(job_dir, clip, spec, reason=reason)
         watcher.note(job_dir, clip)
-        _publish_spec(job_dir, clip, saved, "claude")
+        _publish_spec(job_dir, clip, saved, "ai")
         return saved
 
     try:

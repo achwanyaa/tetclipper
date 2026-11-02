@@ -76,7 +76,7 @@ def run(job: queue.Job, top: int, captions: str | None, cloud: bool, emit: Emit)
             auto_brain.answer(job_dir, lambda f, m: emit("judge", f, m))
             job = queue.get_job(job.id) or job
     else:
-        raise RuntimeError("Claude Code didn't finish judging the moments.")
+        raise RuntimeError("The AI didn't finish judging the moments.")
 
     clips = json.loads((job_dir / "score.json").read_text(encoding="utf-8"))["data"]["clips"]
     chosen = list(range(min(top, len(clips))))  # finalists are sorted best-first

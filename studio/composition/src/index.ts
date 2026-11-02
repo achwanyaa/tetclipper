@@ -5,4 +5,5 @@ export { VerticalClip, calculateClipMetadata, clipDurationInFrames } from './Ver
 export { PRESETS, type Preset } from './captions/presets'
 export { chunkWords } from './captions/chunk'
 export { visibleWords } from './captions/Captions'
-export { musicGains, speechSpans } from './music'
+export { musicGains, musicRange, speechSpans } from './music'
+export { transitionLook } from './transitions'

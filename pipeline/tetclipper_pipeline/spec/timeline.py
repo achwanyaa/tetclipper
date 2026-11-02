@@ -11,13 +11,22 @@ def _round(x: float) -> int:
     return int(x + 0.5)  # JS Math.round for the non-negative values used here
 
 
+def _bookend_frames(item: dict | None, video_frames: int, fps: int) -> tuple[int, int]:
+    """(frames on screen, frames overlapping the video) for an intro or outro."""
+    if not item:
+        return 0, 0
+    on_screen = _round(float(item.get("duration", 2)) * fps)
+    transition = item.get("transition")
+    wanted = _round(float(transition.get("duration", 0.5)) * fps) if transition else 0
+    return on_screen, max(0, min(wanted, on_screen - 1, video_frames))
+
+
 def segments(spec: dict, fps: int = FPS) -> tuple[int, list[tuple[float, int]]]:
-    """(intro frames, [(source start, frames)]) exactly as buildTimeline() in
-    studio/composition/src/timeline.ts: the source range minus merged cuts."""
+    """(frame the video starts at, [(source start, frames)]) exactly as
+    buildTimeline() in studio/composition/src/timeline.ts: the source range minus
+    merged cuts, after the intro less any overlap with its transition."""
     src = spec["source"]
     a, b = float(src["start"]), float(src["end"])
-    intro = spec.get("intro")
-    intro_frames = _round(float(intro.get("duration", 2)) * fps) if intro else 0
     cuts = sorted(
         (max(a, min(c["start"], c["end"])), min(b, max(c["start"], c["end"])))
         for c in spec.get("cuts", [])
@@ -37,19 +46,34 @@ def segments(spec: dict, fps: int = FPS) -> tuple[int, list[tuple[float, int]]]:
         if n >= 1:
             out.append((cursor, n))
         cursor = c1
-    return intro_frames, out
+    on_screen, overlap = _bookend_frames(spec.get("intro"), sum(n for _, n in out), fps)
+    return on_screen - overlap, out
+
+
+def outro_start(spec: dict, fps: int = FPS) -> int:
+    """The outro's first frame (the output's end when there is no outro)."""
+    intro, segs = segments(spec, fps)
+    video = sum(n for _, n in segs)
+    return intro + video - _bookend_frames(spec.get("outro"), video, fps)[1]
 
 
 def total_frames(spec: dict, fps: int = FPS) -> int:
-    """Output length in frames: intro + every kept segment."""
-    intro, segs = segments(spec, fps)
-    return max(1, intro + sum(n for _, n in segs))
+    """Output length in frames: intro + every kept segment + outro."""
+    _, segs = segments(spec, fps)
+    on_screen = _bookend_frames(spec.get("outro"), sum(n for _, n in segs), fps)[0]
+    return max(1, outro_start(spec, fps) + on_screen)
+
+
+def intro_on_screen(spec: dict, fps: int = FPS) -> int:
+    return _bookend_frames(spec.get("intro"), sum(n for _, n in segments(spec, fps)[1]), fps)[0]
 
 
 
-def source_time_at(intro_frames: int, segs: list[tuple[float, int]], frame: int, fps: int = FPS) -> float | None:
-    """Source seconds shown at an output frame (None during the intro)."""
-    if frame < intro_frames:
+def source_time_at(intro_frames: int, segs: list[tuple[float, int]], frame: int, fps: int = FPS,
+                   has_outro: bool = False) -> float | None:
+    """Source seconds shown at an output frame (None during the intro, or once
+    only the outro is left)."""
+    if frame < intro_frames or (has_outro and frame >= intro_frames + sum(n for _, n in segs)):
         return None
     start = intro_frames
     for seg_start, n in segs:

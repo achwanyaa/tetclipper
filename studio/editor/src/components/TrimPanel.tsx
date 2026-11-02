@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
-import type { ClipSpecInput } from '@tetclipper/composition'
+import { Fragment, useEffect, useState } from 'react'
+import { FPS, TRANSITIONS, frameAtSource, type ClipSpecInput, type TransitionType } from '@tetclipper/composition'
 import { fmt, invoke } from '../api'
 import type { PanelProps } from './Canvas'
+import { TRANSITION_LABELS, TransitionPicker } from './TransitionPicker'
 
 /** Clip range (source seconds) and the list of cuts. */
-export function TrimPanel({ data, spec, editor, update, seek, setError }: PanelProps) {
+export function TrimPanel({ data, spec, editor, update, seek, setError, timeline, previewFrame }: PanelProps) {
   const { start, end } = spec.source
   const cuts = spec.cuts ?? []
   const words = spec.words ?? []
@@ -18,6 +19,8 @@ export function TrimPanel({ data, spec, editor, update, seek, setError }: PanelP
   const [fillers, setFillers] = useState(false)
   const [preview, setPreview] = useState<{ cuts: number; saved: number; fillers: number } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState<number | null>(null)
+  const [bulk, setBulk] = useState<TransitionType | ''>('fade')
   const [stutters, setStutters] = useState<{ found: number; saved: number; removals: { at: number; kind: string; text: string }[] } | null>(null)
 
   useEffect(() => {
@@ -62,6 +65,16 @@ export function TrimPanel({ data, spec, editor, update, seek, setError }: PanelP
     } finally {
       setBusy(false)
     }
+  }
+
+  const applyToLongCuts = () =>
+    update(
+      { ...spec, cuts: cuts.map((c) => (c.end - c.start >= 1 ? { ...c, transition: bulk ? { type: bulk, duration: 0.5 } : null } : c)) },
+      bulk ? `transition on cuts: ${TRANSITION_LABELS[bulk]}` : 'hard cuts'
+    )
+  const previewCut = (end: number) => {
+    const f = timeline && frameAtSource(timeline, end + 0.001, FPS)
+    if (f !== null && f !== undefined) previewFrame(Math.max(0, f - FPS))
   }
 
   const nudge = (which: 'start' | 'end', by: number) =>
@@ -126,25 +139,65 @@ export function TrimPanel({ data, spec, editor, update, seek, setError }: PanelP
         available {fmt(first)}–{fmt(last)} in the downloaded slice.
       </p>
       {cuts.length > 0 && (
-        <table className="effects">
-          <tbody>
-            {cuts.map((c, i) => (
-              <tr key={i}>
-                <td>
-                  <button className="link" onClick={() => seek(Math.max(start, c.start - 1.5))}>
-                    ✂ {fmt(c.start)} – {fmt(c.end)}
-                  </button>
-                </td>
-                <td className="muted">{(c.end - c.start).toFixed(1)} s</td>
-                <td>
-                  <button className="link" onClick={() => update({ ...spec, cuts: cuts.filter((_, j) => j !== i) }, 'restore cut')}>
-                    restore
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          <div className="trim-row">
+            <span>Effect</span>
+            <select value={bulk} aria-label="Transition for longer cuts" onChange={(e) => setBulk(e.target.value as TransitionType | '')}>
+              <option value="">Hard cut</option>
+              {TRANSITIONS.map((t) => (
+                <option key={t} value={t}>
+                  {TRANSITION_LABELS[t]}
+                </option>
+              ))}
+            </select>
+            <button disabled={!cuts.some((c) => c.end - c.start >= 1)} onClick={applyToLongCuts}>
+              Apply to cuts of 1 s or longer
+            </button>
+          </div>
+          <table className="effects">
+            <tbody>
+              {cuts.map((c, i) => (
+                <Fragment key={i}>
+                  <tr>
+                    <td>
+                      <button className="link" onClick={() => seek(Math.max(start, c.start - 1.5))}>
+                        ✂ {fmt(c.start)} – {fmt(c.end)}
+                      </button>
+                    </td>
+                    <td className="muted">{(c.end - c.start).toFixed(1)} s</td>
+                    <td>
+                      <button className="link" aria-expanded={editing === i} onClick={() => setEditing(editing === i ? null : i)}>
+                        {c.transition ? TRANSITION_LABELS[c.transition.type] : 'Hard cut'}
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        className="link"
+                        onClick={() => {
+                          setEditing(null)
+                          update({ ...spec, cuts: cuts.filter((_, j) => j !== i) }, 'restore cut')
+                        }}
+                      >
+                        restore
+                      </button>
+                    </td>
+                  </tr>
+                  {editing === i && (
+                    <tr>
+                      <td colSpan={4}>
+                        <TransitionPicker
+                          value={c.transition}
+                          onChange={(transition, reason) => update({ ...spec, cuts: cuts.map((x, j) => (j === i ? { ...x, transition } : x)) }, reason)}
+                          onPreview={() => previewCut(c.end)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </>
       )}
     </div>
   )

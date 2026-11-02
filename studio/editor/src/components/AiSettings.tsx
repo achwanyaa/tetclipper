@@ -99,7 +99,7 @@ export function AiSettings({ onClose, onSaved }: Props) {
         ...(key.trim() ? { key: key.trim() } : {}),
         clear_key: clearKey,
         ...(provider === 'custom' ? { base_url: baseUrl } : {}),
-        ...(api && p.kind !== 'anthropic' ? { price_in: num(priceIn), price_out: num(priceOut) } : {})
+        ...(p.custom_price ? { price_in: num(priceIn), price_out: num(priceOut) } : {})
       })
       setSettings(s)
       setKey('')
@@ -178,7 +178,7 @@ export function AiSettings({ onClose, onSaved }: Props) {
                 )}
               </label>
 
-              {p.kind !== 'anthropic' && (
+              {p.custom_price && (
                 <div className="field">
                   <span className="label">Price per million tokens (optional, to show costs)</span>
                   <div className="range-grid">
@@ -222,7 +222,7 @@ function Shell({ onClose, children }: { onClose: () => void; children: React.Rea
         <div className="row">
           <div className="spacer" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <b style={{ fontSize: 20 }}>AI model</b>
-            <span className="small muted">The model behind the Claude chat, for every user. Keys stay on the server.</span>
+            <span className="small muted">The model behind the AI chat, for every user. Keys stay on the server.</span>
           </div>
           <button className="link muted" onClick={onClose}>
             ✕

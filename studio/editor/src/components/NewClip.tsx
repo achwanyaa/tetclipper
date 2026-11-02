@@ -45,7 +45,7 @@ const LANGUAGES: [string, string][] = [
   ['auto', 'Auto']
 ]
 
-/** Step 1 · Video: pick the source and the range (or ask Claude to find moments). */
+/** Step 1 · Video: pick the source and the range (or ask AI to find moments). */
 export function NewClip({ busy, online, onCut, onFind }: Props) {
   const [source, setSource] = useState('')
   const [from, setFrom] = useState('')
@@ -121,7 +121,7 @@ export function NewClip({ busy, online, onCut, onFind }: Props) {
             ) : mode === 'find' ? (
               <>
                 <b>Find the best moments</b>
-                <span>Claude reads the transcript and picks the {top} strongest moments{rangeGiven && rangeOk ? ` between ${fmt(start)} and ${fmt(end)}` : ''}.</span>
+                <span>AI reads the transcript and picks the {top} strongest moments{rangeGiven && rangeOk ? ` between ${fmt(start)} and ${fmt(end)}` : ''}.</span>
               </>
             ) : (
               <>
@@ -142,7 +142,7 @@ export function NewClip({ busy, online, onCut, onFind }: Props) {
               Exact range<span>You pick the start and end.</span>
             </button>
             <button className={`mode-card ${mode === 'find' ? 'on' : ''}`} onClick={() => setMode('find')}>
-              Find moments<span>Claude finds the best parts and scores them.</span>
+              Find moments<span>AI finds the best parts and scores them.</span>
             </button>
           </div>
 

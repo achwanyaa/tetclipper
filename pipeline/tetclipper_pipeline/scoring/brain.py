@@ -37,8 +37,8 @@ class AwaitingBrain(StageError):
         self.count = count
         self.purpose = purpose
         super().__init__(
-            f"Waiting for Claude Code: {count} {purpose} prompt(s). "
-            f"Run /score-clips {job_dir.name} in Claude Code, then resume."
+            f"Waiting for the AI: {count} {purpose} prompt(s). "
+            f"Answer them with `tetclipper brain`, then resume."
         )
 
 

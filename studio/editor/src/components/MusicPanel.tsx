@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
-import { invoke, onEvent, upload } from '../api'
+import { FPS } from '@tetclipper/composition'
+import { fileUrl, invoke, mediaUrl, onEvent, upload } from '../api'
+import { playPreview, stopPreview, useAudioPreview } from '../audioPreview'
 import type { PanelProps } from './Canvas'
+import { MusicRange } from './MusicRange'
 
 interface Track {
   id: string
@@ -14,13 +17,17 @@ interface Track {
 
 const fileName = (src: string) => src.split('/').pop() ?? src
 
-/** Music bed: pick from the local library or upload a track; volume, ducking, fades. */
-export function MusicPanel({ data, spec, update, setError }: PanelProps) {
+const seconds = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
+
+/** Music bed: pick from the local library (hear it first) or upload a track;
+ *  the part of it to use, volume, ducking, fades. */
+export function MusicPanel({ data, spec, update, setError, timeline, pausePlayer }: PanelProps) {
   const music = spec.music ?? null
   const [tracks, setTracks] = useState<Track[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [keys, setKeys] = useState<{ jamendo: boolean; freesound: boolean } | null>(null)
   const [key, setKey] = useState('')
+  const preview = useAudioPreview()
 
   useEffect(() => {
     invoke<{ has_jamendo_key: boolean; has_freesound_key: boolean }>('audio_keys_status')
@@ -47,13 +54,15 @@ export function MusicPanel({ data, spec, update, setError }: PanelProps) {
     setBusy(label)
     try {
       const { src } = await invoke<{ src: string }>('studio_attach', { jobId: data.jobId, clip: data.clip, path })
-      update({ ...spec, music: { volume: 0.25, duck: 0.35, offset: 0, fadeIn: 1, fadeOut: 1.5, loop: true, ...music, src } }, `music: ${label}`)
+      update({ ...spec, music: { volume: 0.25, duck: 0.35, fadeIn: 1, fadeOut: 1.5, loop: true, ...music, src, offset: 0, end: null } }, `music: ${label}`)
     } catch (e) {
       setError(String((e as Error).message ?? e))
     } finally {
       setBusy(null)
     }
   }
+
+  useEffect(() => stopPreview, []) // leaving the tab ends any preview
 
   const set = (patch: Record<string, unknown>, reason: string) => music && update({ ...spec, music: { ...music, ...patch } }, reason)
 
@@ -67,6 +76,15 @@ export function MusicPanel({ data, spec, update, setError }: PanelProps) {
               remove
             </button>
           </div>
+          <MusicRange
+            url={mediaUrl(data.jobDir, music.src)}
+            start={music.offset ?? 0}
+            end={music.end ?? null}
+            clipSeconds={(timeline?.totalFrames ?? 0) / FPS}
+            loop={music.loop ?? true}
+            beforePlay={pausePlayer}
+            onChange={(offset, end, reason) => set({ offset, end }, reason)}
+          />
           <label>
             Volume <span>{Math.round((music.volume ?? 0.25) * 100)}%</span>
             <input type="range" min={0} max={1} step={0.01} value={music.volume ?? 0.25} onChange={(e) => set({ volume: +e.target.value }, 'music volume')} />
@@ -75,12 +93,6 @@ export function MusicPanel({ data, spec, update, setError }: PanelProps) {
             Under speech <span>{Math.round((music.duck ?? 0.35) * 100)}% of that</span>
             <input type="range" min={0} max={1} step={0.01} value={music.duck ?? 0.35} onChange={(e) => set({ duck: +e.target.value }, 'music ducking')} />
           </label>
-          <div className="row">
-            <label>
-              Start at <span>{(music.offset ?? 0).toFixed(1)} s into the track</span>
-              <input type="range" min={0} max={120} step={0.5} value={music.offset ?? 0} onChange={(e) => set({ offset: +e.target.value }, 'music offset')} />
-            </label>
-          </div>
           <div className="row">
             <label>
               Fade in <span>{(music.fadeIn ?? 1).toFixed(1)} s</span>
@@ -97,7 +109,7 @@ export function MusicPanel({ data, spec, update, setError }: PanelProps) {
           </div>
         </div>
       ) : (
-        <p className="muted small">No music. Pick a track below, upload one, or ask Claude.</p>
+        <p className="muted small">No music. Pick a track below, upload one, or ask AI.</p>
       )}
 
       <div className="row music-actions">
@@ -160,23 +172,39 @@ export function MusicPanel({ data, spec, update, setError }: PanelProps) {
       </div>
 
       {tracks.length > 0 && (
-        <table className="effects">
-          <tbody>
-            {tracks.map((t) => (
-              <tr key={t.id}>
-                <td>{t.name}</td>
-                <td className="muted">{t.tags.slice(0, 3).join(', ')}</td>
-                <td className="muted">{t.bpm ? `${Math.round(t.bpm)} bpm` : ''}</td>
-                <td className="muted">{Math.round(t.duration)} s</td>
-                <td>
-                  <button className="link" disabled={!!busy} onClick={() => use(t.path, t.name)}>
-                    use
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <ul className="track-list">
+          {tracks.map((t) => {
+            const url = fileUrl(t.path)
+            const playing = preview.playing && preview.url === url
+            return (
+              <li key={t.id} className={playing ? 'playing' : ''}>
+                <button
+                  className="round-play"
+                  aria-label={playing ? `Pause ${t.name}` : `Play ${t.name}`}
+                  onClick={() => {
+                    if (playing) return stopPreview()
+                    pausePlayer()
+                    playPreview(url)
+                  }}
+                >
+                  {playing ? '❚❚' : '▶'}
+                </button>
+                <div className="track-text">
+                  <b>{t.name}</b>
+                  <span className="muted small">{[seconds(t.duration), t.bpm ? `${Math.round(t.bpm)} bpm` : '', ...t.tags.slice(0, 2)].filter(Boolean).join(' · ')}</span>
+                  {playing && t.duration > 0 && (
+                    <span className="track-progress">
+                      <i style={{ width: `${Math.min(100, (preview.time / t.duration) * 100)}%` }} />
+                    </span>
+                  )}
+                </div>
+                <button className="sm" disabled={!!busy} onClick={() => use(t.path, t.name)}>
+                  Use
+                </button>
+              </li>
+            )
+          })}
+        </ul>
       )}
     </div>
   )

@@ -1,4 +1,4 @@
-/* tetclipper "Guided steps" design system (Claude Design, direction B).
+/* tetclipper "Guided steps" design system (direction B).
    Token names map 1:1 to the design; light and dark are two variable sets.
    The video stage stays dark in both themes. */
 :root,
@@ -266,20 +266,20 @@ input[type='file'] { height: auto; padding: 6px; }
 .timeline .lane-row.cut-row { height: 14px; }
 .timeline .lane-row.ruler-row { height: 12px; }
 
-.claude-bar { flex: none; border-radius: 18px; padding: 12px 12px 12px 16px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
-.claude-bar .last { display: flex; align-items: center; gap: 10px; font-size: 13px; min-height: 22px; }
-.claude-bar .last .text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.claude-bar .last .text.mu { color: var(--mu); }
-.claude-bar .last .who { font-family: var(--mono); font-size: 11px; color: var(--mu); white-space: nowrap; }
+.ai-bar { flex: none; border-radius: 18px; padding: 12px 12px 12px 16px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
+.ai-bar .last { display: flex; align-items: center; gap: 10px; font-size: 13px; min-height: 22px; }
+.ai-bar .last .text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-bar .last .text.mu { color: var(--mu); }
+.ai-bar .last .who { font-family: var(--mono); font-size: 11px; color: var(--mu); white-space: nowrap; }
 .avatar-c { width: 22px; height: 22px; border-radius: 50%; background: var(--acs); color: var(--ink); font-weight: 700; font-size: 11px; display: flex; align-items: center; justify-content: center; flex: none; }
-.claude-bar form { display: flex; align-items: center; gap: 10px; }
-.claude-bar form input[type='text'] { flex: 1; height: 44px; padding: 0 16px; border-radius: 12px; background: var(--sf2); border: none; font-size: 14px; }
-.claude-bar form input[type='text']:focus { box-shadow: inset 0 0 0 1.5px var(--ac); }
-.claude-bar form .ctx { height: 44px; border-radius: 12px; font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--mu); }
-.claude-bar form .ctx.on { color: var(--ink); }
-.claude-bar form .primary { height: 44px; padding: 0 20px; border-radius: 12px; }
-.claude-bar .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-.claude-bar .warn { font-size: 12px; color: var(--wn); font-weight: 600; }
+.ai-bar form { display: flex; align-items: center; gap: 10px; }
+.ai-bar form input[type='text'] { flex: 1; height: 44px; padding: 0 16px; border-radius: 12px; background: var(--sf2); border: none; font-size: 14px; }
+.ai-bar form input[type='text']:focus { box-shadow: inset 0 0 0 1.5px var(--ac); }
+.ai-bar form .ctx { height: 44px; border-radius: 12px; font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--mu); }
+.ai-bar form .ctx.on { color: var(--ink); }
+.ai-bar form .primary { height: 44px; padding: 0 20px; border-radius: 12px; }
+.ai-bar .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.ai-bar .warn { font-size: 12px; color: var(--wn); font-weight: 600; }
 .typing { display: inline-flex; gap: 4px; padding: 0 2px; }
 .typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--mu); animation: blink 1.2s infinite; }
 .typing span:nth-child(2) { animation-delay: 0.2s; }
@@ -373,7 +373,7 @@ input[type='file'] { height: auto; padding: 6px; }
 .intro-panel .controls { flex: 1; min-width: 180px; }
 .drop { width: 130px; aspect-ratio: 9 / 16; border: 1.5px dashed var(--ln); border-radius: 12px; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--mu); cursor: pointer; overflow: hidden; padding: 8px; font-size: 12px; background: var(--sf2); }
 .drop.over { border-color: var(--ac); }
-.drop img { width: calc(100% + 16px); height: calc(100% + 16px); object-fit: cover; margin: -8px; }
+.drop img, .drop video { width: calc(100% + 16px); height: calc(100% + 16px); object-fit: cover; margin: -8px; }
 
 /* effects */
 .fx-catalog { display: flex; flex-direction: column; gap: 10px; }
@@ -454,7 +454,77 @@ tr.open td { border-bottom: none; }
 }
 @media (max-width: 900px) {
   .editor, .make { grid-template-columns: 1fr; grid-template-rows: auto auto; overflow-y: auto; }
+  .editor { grid-template-rows: max-content max-content; }
   .editor-main { min-height: 80vh; }
   .steps { display: none; }
   .home { padding: 24px 16px 40px; }
 }
+
+/* Timeline: intro/outro blocks and transition marks, in the cuts lane. */
+.timeline .cuts b.bookend { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--acs); box-shadow: inset 0 0 0 1px var(--ac); color: var(--ink); font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.timeline .cuts i.transition-mark { position: absolute; top: 3px; width: 8px; height: 8px; margin-left: -4px; background: var(--ac); transform: rotate(45deg); }
+
+/* Intro & outro tab */
+.bookends-panel { display: flex; flex-direction: column; gap: 22px; }
+.bookend-card { display: flex; flex-direction: column; gap: 12px; }
+.bookend-card + .bookend-card { padding-top: 18px; border-top: 1px solid var(--ln); }
+
+/* Music: the range picker, like the one in Instagram's music sheet. */
+.music-range { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--sf2); }
+.range-top { display: flex; align-items: center; gap: 10px; }
+.range-times { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+.round-play { flex: none; width: 36px; height: 36px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; background: var(--ac); color: var(--aci); border: none; }
+button.round-play:hover:not(:disabled) { background: var(--ac); filter: brightness(1.06); }
+.round-play:disabled { opacity: 0.4; }
+.range-track { position: relative; height: 64px; touch-action: none; user-select: none; }
+.range-track.loading { opacity: 0.45; }
+.range-bars { position: absolute; inset: 6px 0; display: flex; align-items: center; gap: 1px; pointer-events: none; }
+.range-bars i { flex: 1; min-width: 0; border-radius: 2px; background: var(--mu); opacity: 0.35; }
+.range-bars i.in { background: var(--ac); opacity: 1; }
+.range-window { position: absolute; top: 0; bottom: 0; border-radius: 10px; box-shadow: inset 0 0 0 2px var(--ac); background: color-mix(in srgb, var(--ac) 12%, transparent); cursor: grab; touch-action: none; min-width: 12px; }
+.range-window:active { cursor: grabbing; }
+.range-window:focus-visible, .range-handle:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.range-handle { position: absolute; top: 0; bottom: 0; width: 22px; cursor: ew-resize; touch-action: none; display: flex; align-items: center; justify-content: center; }
+.range-handle.start { left: -11px; }
+.range-handle.end { right: -11px; }
+.range-handle::after { content: ''; width: 8px; height: 30px; border-radius: 4px; background: var(--ac); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); }
+.range-playhead { position: absolute; top: 2px; bottom: 2px; width: 2px; margin-left: -1px; background: var(--ink); pointer-events: none; }
+.music-range p { margin: 0; }
+
+/* Music: the library with a preview on every row */
+.track-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.track-list li { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; }
+.track-list li:hover, .track-list li.playing { background: var(--sf2); }
+.track-list .round-play { background: var(--sf2); color: var(--ink); }
+.track-list li button.round-play:hover:not(:disabled), .track-list li:hover .round-play { background: var(--ln); filter: none; }
+.track-list li.playing button.round-play, .track-list li.playing button.round-play:hover:not(:disabled) { background: var(--ac); color: var(--aci); }
+.track-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.track-text b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.track-progress { display: block; height: 3px; margin-top: 3px; border-radius: 2px; background: var(--ln); overflow: hidden; }
+.track-progress i { display: block; height: 100%; background: var(--ac); }
+
+/* Transition picker: tiles with a tiny animated demo on hover */
+.transition-picker { display: flex; flex-direction: column; gap: 10px; }
+.transition-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
+.transition-tile { display: flex; flex-direction: column; align-items: center; gap: 5px; height: auto; padding: 7px 4px; border-radius: 10px; font-size: 11px; font-weight: 500; background: var(--sf2); border: none; white-space: normal; line-height: 1.15; }
+.transition-tile.on { box-shadow: inset 0 0 0 2px var(--ac); }
+.tile-art { position: relative; width: 44px; height: 30px; border-radius: 5px; overflow: hidden; background: var(--ac); display: block; }
+.tile-art i { position: absolute; inset: 0; background: var(--mu); }
+.tile-art.none { background: linear-gradient(90deg, var(--mu) 50%, var(--ac) 50%); }
+.transition-tile:hover .tile-art.fade i, .transition-tile:focus-visible .tile-art.fade i { animation: t-fade 1.1s ease-in-out infinite; }
+.transition-tile:hover .tile-art.dip-black i, .transition-tile:focus-visible .tile-art.dip-black i { animation: t-dip-black 1.1s ease-in-out infinite; }
+.transition-tile:hover .tile-art.dip-white i, .transition-tile:focus-visible .tile-art.dip-white i { animation: t-dip-white 1.1s ease-in-out infinite; }
+.transition-tile:hover .tile-art.slide-left i, .transition-tile:focus-visible .tile-art.slide-left i { animation: t-slide-left 1.1s ease-in-out infinite; }
+.transition-tile:hover .tile-art.slide-up i, .transition-tile:focus-visible .tile-art.slide-up i { animation: t-slide-up 1.1s ease-in-out infinite; }
+.transition-tile:hover .tile-art.zoom i, .transition-tile:focus-visible .tile-art.zoom i { animation: t-zoom 1.1s ease-in-out infinite; }
+.transition-tile:hover .tile-art.wipe i, .transition-tile:focus-visible .tile-art.wipe i { animation: t-wipe 1.1s ease-in-out infinite; }
+.transition-tile:hover .tile-art.blur i, .transition-tile:focus-visible .tile-art.blur i { animation: t-blur 1.1s ease-in-out infinite; }
+@keyframes t-fade { 20% { opacity: 1; } 80%, 100% { opacity: 0; } }
+@keyframes t-dip-black { 0%, 20% { background: var(--mu); opacity: 1; } 50% { background: #000; opacity: 1; } 80%, 100% { background: #000; opacity: 0; } }
+@keyframes t-dip-white { 0%, 20% { background: var(--mu); opacity: 1; } 50% { background: #fff; opacity: 1; } 80%, 100% { background: #fff; opacity: 0; } }
+@keyframes t-slide-left { 20% { transform: none; } 80%, 100% { transform: translateX(-100%); } }
+@keyframes t-slide-up { 20% { transform: none; } 80%, 100% { transform: translateY(-100%); } }
+@keyframes t-zoom { 20% { transform: none; opacity: 1; } 80%, 100% { transform: scale(2.2); opacity: 0; } }
+@keyframes t-wipe { 20% { clip-path: inset(0 0 0 0); } 80%, 100% { clip-path: inset(0 100% 0 0); } }
+@keyframes t-blur { 20% { filter: none; opacity: 1; } 80%, 100% { filter: blur(8px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .tile-art i { animation: none !important; } }

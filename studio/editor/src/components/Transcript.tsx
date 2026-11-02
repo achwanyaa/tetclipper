@@ -88,7 +88,7 @@ export function Transcript(props: PanelProps) {
             </button>
           </>
         ) : (
-          <span className="muted small">Click a word to jump · double-click to fix it · shift-click to select a span (then cut, hide, or ask Claude)</span>
+          <span className="muted small">Click a word to jump · double-click to fix it · shift-click to select a span (then cut, hide, or ask AI)</span>
         )}
       </div>
       <div className="phrases">

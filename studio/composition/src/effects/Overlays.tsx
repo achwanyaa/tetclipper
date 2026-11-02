@@ -111,10 +111,10 @@ function Piece({ effect, local, fps, layer, matte }: { effect: Effect; local: nu
 
 export function Overlays({ spec, tl, layer = 'front' }: { spec: ClipSpec; tl: Timeline; layer?: 'behind' | 'front' }) {
   const frame = useCurrentFrame()
-  const { fps, durationInFrames } = useVideoConfig()
+  const { fps } = useVideoConfig()
   const t = useSourceTime(tl)
   if (t === null) return null // intro still is on screen
-  const videoFrames = Math.max(1, durationInFrames - tl.introFrames)
+  const videoFrames = Math.max(1, tl.videoEnd - tl.introFrames)
   return (
     <AbsoluteFill>
       {spec.effects

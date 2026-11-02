@@ -101,6 +101,7 @@ export function resolveForPlayer(spec: ClipSpecInput, jobDir: string): ClipSpecI
     ...spec,
     source: { ...spec.source, src: mediaUrl(jobDir, spec.source.src) },
     intro: spec.intro ? { ...spec.intro, src: mediaUrl(jobDir, spec.intro.src) } : spec.intro,
+    outro: spec.outro ? { ...spec.outro, src: mediaUrl(jobDir, spec.outro.src) } : spec.outro,
     music: spec.music ? { ...spec.music, src: mediaUrl(jobDir, spec.music.src) } : spec.music,
     matte: spec.matte ? { ...spec.matte, src: mediaUrl(jobDir, spec.matte.src) } : spec.matte,
     effects: spec.effects?.map((e) => ((e.type === 'image' || e.type === 'background') && e.src ? { ...e, src: mediaUrl(jobDir, e.src) } : e))
@@ -116,16 +117,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'error'
   text: string
   ts?: number
-  model?: string | null
   cost?: number | null
-}
-
-/** Which AI answers in the Studio chat (set by the admin under AI model). */
-export interface Engine {
-  provider: string
-  model: string
-  label: string
-  ready: boolean
 }
 
 export interface ClipData {
@@ -135,14 +127,15 @@ export interface ClipData {
   title: string
   spec: ClipSpecInput
   history: HistoryEntry[]
-  chat: { messages: ChatMessage[]; busy: boolean; available: boolean; engine: Engine; notice?: string | null }
+  chat: { messages: ChatMessage[]; busy: boolean; available: boolean; notice?: string | null }
   render: { output: string; spec_version: number | null; rendered_at: string } | null
 }
 
 export interface AiProvider {
   id: string
   label: string
-  kind: 'cli' | 'anthropic' | 'openai'
+  kind: string
+  custom_price: boolean // no built-in price list: the admin can enter one
   note: string | null
   key_url: string | null
   default: string
@@ -184,7 +177,7 @@ export type ServerEvent =
   | { event: 'result'; ok: boolean; job_id?: string; clip?: number; error?: string; output?: unknown }
   | { event: 'exited'; code: number }
   | { event: 'spec'; job_id: string; clip: number; spec: ClipSpecInput; source: string; history: HistoryEntry[] }
-  | { event: 'studio-chat'; job_id: string; clip: number; kind: 'text' | 'delta' | 'tool' | 'done'; text?: string; error?: string | null; model?: string | null; cost?: number | null }
+  | { event: 'studio-chat'; job_id: string; clip: number; kind: 'text' | 'delta' | 'tool' | 'done'; text?: string; error?: string | null; cost?: number | null }
 
 export function fmt(t: number): string {
   const m = Math.floor(t / 60)

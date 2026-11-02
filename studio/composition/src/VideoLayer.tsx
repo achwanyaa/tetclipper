@@ -1,7 +1,8 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { AbsoluteFill, Easing, Img, OffthreadVideo, Sequence, interpolate, useCurrentFrame, useVideoConfig } from 'remotion'
 import { BEHIND_EFFECTS, type ClipSpec, type Effect } from './spec'
-import { type Timeline, frameAtSource, sourceTimeAt } from './timeline'
+import { type CutTransition, type Timeline, frameAtSource, sourceTimeAt } from './timeline'
+import { transitionLook } from './transitions'
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
 const ease = Easing.inOut(Easing.cubic)
@@ -287,6 +288,38 @@ export function VideoLayer({ spec, tl }: { spec: ClipSpec; tl: Timeline }) {
   )
 }
 
+function CutTransitionLayer({ spec, move }: { spec: ClipSpec; move: CutTransition }) {
+  const frame = useCurrentFrame()
+  const { fps, width: W, height: H } = useVideoConfig()
+  const look = transitionLook(move.type, (frame + 0.5) / move.frames)
+  const shot = (at: number) => (
+    // Muted: the speech stays on the cut, in the layer underneath.
+    <OffthreadVideo src={spec.source.src} muted trimBefore={Math.round(at * fps)} style={placement(spec, at + frame / fps, 1, 0, 0, W, H)} />
+  )
+  return (
+    <AbsoluteFill style={{ backgroundColor: '#000', overflow: 'hidden' }}>
+      {shot(move.incoming)}
+      <AbsoluteFill style={{ backgroundColor: '#000', ...look.style }}>{shot(move.outgoing)}</AbsoluteFill>
+      {look.cover && <AbsoluteFill style={look.cover} />}
+    </AbsoluteFill>
+  )
+}
+
+/** Transitions across cuts, drawn over the video layer and under the graphics.
+ *  Camera effects don't animate inside the window. */
+export function CutTransitions({ spec, tl }: { spec: ClipSpec; tl: Timeline }) {
+  const { fps } = useVideoConfig()
+  return (
+    <>
+      {tl.transitions.map((move) => (
+        <Sequence key={move.from} from={move.from} durationInFrames={move.frames} premountFor={fps}>
+          <CutTransitionLayer spec={spec} move={move} />
+        </Sequence>
+      ))}
+    </>
+  )
+}
+
 /** The cut-out speaker (spec.matte) drawn over behind-the-speaker effects with
  *  the background's placement (minus vertigo), only while one is active. */
 export function SpeakerLayer({ spec, tl }: { spec: ClipSpec; tl: Timeline }) {
@@ -295,6 +328,7 @@ export function SpeakerLayer({ spec, tl }: { spec: ClipSpec; tl: Timeline }) {
   if (!spec.matte) return null
   const windows = behindWindows(spec, tl, fps)
   if (!windows.length) return null
+  if (tl.transitions.some((m) => frame >= m.from && frame < m.from + m.frames)) return null
   const t = sourceTimeAt(tl, frame, fps) ?? spec.source.start
   const look = lookAt(spec, tl, t, frame, fps)
   const style = placement(spec, t, look.zoom, look.dx, look.dy, W, H)

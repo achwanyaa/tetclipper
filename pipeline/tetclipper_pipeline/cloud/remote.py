@@ -104,32 +104,48 @@ def build_spec(job_id: str, clip: int, captions: str | None, glossary_data: dict
     return {"clip": clip}
 
 
-from ..spec.timeline import FPS, segments, total_frames  # noqa: E402 — shared with spec/music.py
+from ..spec.timeline import FPS, _bookend_frames, intro_on_screen, outro_start, segments, total_frames  # noqa: E402 — shared with spec/music.py
 
 
 RATE = 48000
+
+
+def _fit_music(pcm, want: int, loop: bool):
+    """The decoded range at exactly `want` samples: repeated when it loops, else
+    followed by silence."""
+    import numpy as np
+
+    if len(pcm) == 0:
+        return np.zeros((want, 2), dtype=np.float32)
+    if loop:
+        return np.tile(pcm, (want // len(pcm) + 1, 1))[:want]
+    if len(pcm) < want:
+        return np.vstack([pcm, np.zeros((want - len(pcm), 2), dtype=np.float32)])
+    return pcm[:want]
 
 
 def _mix_music(spec: dict, job_dir: Path, speech: Path, out: Path, total: int) -> None:
     """speech.wav + the music bed with the preview's per-frame gains → out."""
     import numpy as np
 
-    from ..spec.music import frame_gains, music_settings
+    from ..spec.music import frame_gains, music_range, music_settings
 
     m = music_settings(spec)
     duration = total / FPS
+    start, end = music_range(m)
+    length = None if end is None else end - start
+    if not m["loop"]:
+        length = duration if length is None else min(length, duration)
     decode = subprocess.run(
-        ["ffmpeg", "-loglevel", "error", *(["-stream_loop", "-1"] if m["loop"] else []),
-         "-ss", f"{float(m['offset']):.3f}", "-i", str(job_dir / m["src"]), "-t", f"{duration:.6f}",
+        ["ffmpeg", "-loglevel", "error", "-ss", f"{start:.3f}", "-i", str(job_dir / m["src"]),
+         *([] if length is None else ["-t", f"{length:.6f}"]),
          "-f", "f32le", "-ac", "2", "-ar", str(RATE), "-"],
         capture_output=True,
     )
     if decode.returncode != 0:
         raise RuntimeError(decode.stderr.decode(errors="replace")[-400:])
-    pcm = np.frombuffer(decode.stdout, dtype=np.float32).reshape(-1, 2).copy()
-    want = int(round(duration * RATE))
-    if len(pcm) < want:  # a short, non-looping track: silence after it ends
-        pcm = np.vstack([pcm, np.zeros((want - len(pcm), 2), dtype=np.float32)])
+    pcm = np.frombuffer(decode.stdout, dtype=np.float32).reshape(-1, 2)
+    pcm = _fit_music(pcm, int(round(duration * RATE)), m["loop"])
     gains = np.repeat(np.asarray(frame_gains(spec), dtype=np.float32), RATE // FPS)
     k = min(len(pcm), len(gains))
     pcm = pcm[:k] * gains[:k, None]
@@ -142,6 +158,52 @@ def _mix_music(spec: dict, job_dir: Path, speech: Path, out: Path, total: int) -
     )
     if mix.returncode != 0:
         raise RuntimeError(mix.stderr[-400:])
+
+
+def _has_audio(path: Path) -> bool:
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True,
+    )
+    return probe.returncode == 0 and bool(probe.stdout.strip())
+
+
+def _bookend_sounds(spec: dict) -> list[dict]:
+    """The intro/outro videos that play sound: start second, length and the fade
+    across the overlap with the speech, matching the composition's volume curve."""
+    video = sum(n for _, n in segments(spec)[1])
+    sounds = []
+    for side, first in (("intro", 0), ("outro", outro_start(spec))):
+        item = spec.get(side)
+        if not item or item.get("kind") != "video" or float(item.get("volume", 1)) <= 0:
+            continue
+        frames, overlap = _bookend_frames(item, video, FPS)
+        sounds.append({"src": item["src"], "at": first / FPS, "length": frames / FPS, "volume": float(item.get("volume", 1)),
+                       "fade": overlap / FPS, "entering": side == "outro"})
+    return sounds
+
+
+def _mix_bookends(spec: dict, job_dir: Path, speech: Path, out: Path) -> bool:
+    """speech + the sound of intro/outro videos → out. False if there's none."""
+    sounds = [s for s in _bookend_sounds(spec) if _has_audio(job_dir / s["src"])]
+    if not sounds:
+        return False
+    args = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(speech)]
+    parts, labels = [], ["[0:a]"]
+    for i, s in enumerate(sounds, 1):
+        args += ["-i", str(job_dir / s["src"])]
+        chain = f"[{i}:a]atrim=duration={s['length']:.6f},asetpts=PTS-STARTPTS,aformat=sample_rates={RATE}:channel_layouts=stereo,volume={s['volume']:.4f}"
+        if s["fade"] > 0:
+            chain += (f",afade=t=in:d={s['fade']:.6f}" if s["entering"]
+                      else f",afade=t=out:st={s['length'] - s['fade']:.6f}:d={s['fade']:.6f}")
+        parts.append(f"{chain},adelay=delays={int(round(s['at'] * 1000))}:all=1[b{i}]")
+        labels.append(f"[b{i}]")
+    graph = ";".join(parts) + ";" + "".join(labels) + f"amix=inputs={len(labels)}:normalize=0:duration=first[out]"
+    run = subprocess.run([*args, "-filter_complex", graph, "-map", "[out]", "-c:a", "pcm_s16le", str(out)],
+                         capture_output=True, text=True)
+    if run.returncode != 0:
+        raise RuntimeError(run.stderr[-400:])
+    return True
 
 
 def chunk_ranges(total: int, max_chunks: int = 40, min_frames: int = 60) -> list[tuple[int, int]]:
@@ -205,7 +267,7 @@ def render(job_dir: str, clip: int, chunk_map: Callable) -> Iterator[dict]:
 
         def audio() -> None:
             # The soundtrack is intro silence + the kept source segments, cut to
-            # the same frame-exact lengths the video uses.
+            # the same frame-exact lengths the video uses, padded through the outro.
             a0 = time.time()
             intro, segs = segments(spec)
             media = Path(job_dir) / spec["source"]["src"]
@@ -214,7 +276,7 @@ def render(job_dir: str, clip: int, chunk_map: Callable) -> Iterator[dict]:
                 for i, (st, n) in enumerate(segs)
             ]
             chain = "".join(f"[s{i}]" for i in range(len(segs))) + f"concat=n={len(segs)}:v=0:a=1[cat]"
-            delay = f";[cat]adelay=delays={intro * 1000 // FPS}:all=1[out]" if intro else ";[cat]anull[out]"
+            delay = f";[cat]adelay=delays={intro * 1000 // FPS}:all=1,apad[out]" if intro else ";[cat]apad[out]"
             run = subprocess.run(
                 ["ffmpeg", "-y", "-loglevel", "error", "-i", str(media), "-filter_complex",
                  ";".join(parts) + ";" + chain + delay, "-map", "[out]", "-ar", "48000", "-ac", "2",
@@ -223,13 +285,16 @@ def render(job_dir: str, clip: int, chunk_map: Callable) -> Iterator[dict]:
             )
             if run.returncode != 0:
                 audio_err.append(run.stderr[-600:])
-            elif spec.get("music"):
+            else:
                 try:
-                    _mix_music(spec, Path(job_dir), tmp / "speech.wav", tmp / "audio.wav", total)
+                    if _mix_bookends(spec, Path(job_dir), tmp / "speech.wav", tmp / "voices.wav"):
+                        (tmp / "voices.wav").replace(tmp / "speech.wav")
+                    if spec.get("music"):
+                        _mix_music(spec, Path(job_dir), tmp / "speech.wav", tmp / "audio.wav", total)
+                    else:
+                        (tmp / "speech.wav").replace(tmp / "audio.wav")
                 except Exception as err:  # noqa: BLE001
                     audio_err.append(f"music: {err}")
-            else:
-                (tmp / "speech.wav").replace(tmp / "audio.wav")
             timings["audio"] = round(time.time() - a0, 1)
 
         audio_thread = threading.Thread(target=audio, daemon=True)

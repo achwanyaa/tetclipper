@@ -114,6 +114,11 @@ export function Timeline({ timeline, spec, frame, playhead, seekFrame, seekSourc
           )}
         </div>
         <div className="cuts">
+          {timeline.introOnScreen > 0 && <b className="bookend" style={{ left: 0, width: pct(timeline.introOnScreen) }} title="Intro">Intro</b>}
+          {timeline.hasOutro && <b className="bookend" style={{ left: pct(timeline.outroStart), right: 0 }} title="Outro">Outro</b>}
+          {timeline.transitions.map((m) => (
+            <i key={m.from} className="transition-mark" style={{ left: pct(m.from + m.frames / 2) }} title={`${fxLabel(m.type)} transition`} />
+          ))}
           {cuts.map((c, k) => (
             <span key={k} style={{ left: pct(c.left), width: `${c.width * 100}%` }} title={`Cut ${c.len.toFixed(1)} s`} />
           ))}

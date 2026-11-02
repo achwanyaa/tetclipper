@@ -225,7 +225,7 @@ export function EffectsPanel({ data, spec, editor, update, seek, setError }: Pan
           ))}
           {sorted.length === 0 && (
             <tr>
-              <td className="muted">No effects yet. Pick one above (added at the playhead), or ask Claude.</td>
+              <td className="muted">No effects yet. Pick one above (added at the playhead), or ask AI.</td>
             </tr>
           )}
         </tbody>

@@ -46,7 +46,7 @@ def test_intro_and_effects_validate():
     "patch, needle",
     [
         ({"captions": {"style": "comic-sans"}}, "captions.style"),
-        ({"intro": {"src": "x.jpg", "duration": 9}}, "intro"),
+        ({"intro": {"src": "x.jpg", "duration": 99}}, "intro"),
         ({"effects": [{"type": "punch-in", "at": 1}]}, "duration"),
         ({"effects": [{"type": "wobble", "at": 1, "duration": 1}]}, "effects[0]"),
         ({"bogus": 1}, "unknown field"),

@@ -111,7 +111,7 @@ export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun
       {!loadError && jobs.length === 0 && !run && (
         <div className="card empty-card">
           <b style={{ fontSize: 16 }}>No clips yet</b>
-          <span className="muted">Paste a video link and pick a range, or let Claude find the best moments.</span>
+          <span className="muted">Paste a video link and pick a range, or let AI find the best moments.</span>
           <button className="tonal" onClick={onNew}>
             + New clip
           </button>
@@ -136,7 +136,7 @@ export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun
               className="link"
               disabled={busy}
               onClick={() => onFind({ source: job.id, top: 5 })}
-              title="Claude finds the best moments in this slice (reuses the analysis)"
+              title="AI finds the best moments in this slice (reuses the analysis)"
             >
               Find more moments
             </button>

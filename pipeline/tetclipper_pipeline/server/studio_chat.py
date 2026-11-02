@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -24,6 +25,8 @@ from pathlib import Path
 from typing import Callable
 
 from ..spec import store
+
+log = logging.getLogger(__name__)
 
 PIPELINE_DIR = Path(__file__).resolve().parents[2]
 
@@ -51,7 +54,7 @@ ALLOWED_TOOLS = [
     "Bash(uv run tetclipper spec stutters:*)",
     "Bash(uv run tetclipper spec words:*)",
 ]
-# With "Let Claude run scripts" on (Studio chat panel; off by default): write
+# With "Let the AI run scripts" on (Studio chat panel; off by default): write
 # helper scripts under ./scripts/ and run them. This runs arbitrary code on
 # the user's PC, so it is the user's explicit choice.
 SCRIPT_TOOLS = [
@@ -63,6 +66,10 @@ SCRIPT_TOOLS = [
 ]
 
 GUIDE = """# Studio clip editor
+
+You are tetclipper's AI editor. If asked which model or company is behind you, say
+you're tetclipper's AI and can't share that; never claim to be a different model or
+deny being an AI.
 
 You are editing ONE vertical (9:16) clip in tetclipper Studio. The user watches
 a live preview of `spec.json` next to this chat; every valid save shows up
@@ -80,11 +87,17 @@ Job {job_id}, clip {clip}: "{title}".
 ## The spec (all times are SOURCE seconds — positions in the media file)
 - `source`: `{{src, start, end, width, height}}` — the clip range. Widen/narrow
   by changing start/end (stay inside the media; the analysis covers it).
-- `intro`: `null` or `{{src, duration: 0.5–5, fit: "cover"|"contain"}}` — a
-  full-screen still before the clip.
-- `music`: `null` or `{{src, volume: 0–1, duck: 0–1, offset, fadeIn, fadeOut, loop}}`
+- `intro`, `outro`: `null` or `{{src, kind: "image"|"video", duration: 0.5–30,
+  fit: "cover"|"contain", volume: 0–1, transition}}` — a full-screen still or video
+  before or after the clip. The user uploads the file in the Intro & outro tab.
+- `transition`: `null` (hard cut) or `{{type, duration: 0.2–2}}`; type is fade |
+  dip-black | dip-white | slide-left | slide-up | zoom | wipe | blur. On intro/outro
+  it runs between them and the video.
+- `music`: `null` or `{{src, volume: 0–1, duck: 0–1, offset, end, fadeIn, fadeOut, loop}}`
   — a music bed under the whole clip; `duck` multiplies the volume while anyone
-  speaks (0.35 = speech stays clear). Tracks the user added live in `assets/`;
+  speaks (0.35 = speech stays clear). `offset` and `end` are the part of the track to
+  use, in track seconds (`end` null = the track's end); it loops inside that part
+  when `loop` is true. Tracks the user added live in `assets/`;
   the user's music library is listed by `uv run tetclipper audio list --kind music`
   (copy a track into assets by asking the user to pick it in the Music tab).
 - To read word timings without opening the big spec, run
@@ -101,8 +114,9 @@ Job {job_id}, clip {clip}: "{title}".
   `uv run tetclipper spec dead-air {job_id} --clip {clip} [--mode natural|tight] [--fillers] --apply`
   (without --apply it only previews). natural keeps short sentence pauses,
   tight is snappier; both keep pauses near laughter. Report cuts and seconds saved.
-- `cuts`: `[{{start, end}}]` — spans removed from the middle of the clip. Snap
-  to word boundaries (word.start / previous word.end) so nothing is clipped.
+- `cuts`: `[{{start, end, transition?}}]` — spans removed from the middle of the
+  clip. Snap to word boundaries (word.start / previous word.end) so nothing is
+  clipped. Only give a cut a transition when asked: automatic cuts stay hard.
 - `words`: `[{{text, start, end, emphasis?, hidden?, speaker?}}]` — captions.
   Fix a misheard word by changing `text`. NEVER add or remove entries in
   `words`: to replace N misheard words with fewer, put the new words on the
@@ -170,7 +184,7 @@ SCRIPTS_ON = """- You may write helper scripts in ./scripts/ and run them with `
   writing spec.json; always run `spec validate` afterwards."""
 SCRIPTS_OFF = """- You can't run scripts in this session (the user hasn't allowed it). Use the
   commands above; if a task really needs a script, say so — the user can turn
-  on "Let Claude run scripts" in the chat panel."""
+  on "Let the AI run scripts" in the chat panel."""
 
 
 def write_guide(job_dir: Path, clip: int, title: str, allow_scripts: bool = False) -> Path:
@@ -182,6 +196,13 @@ def write_guide(job_dir: Path, clip: int, title: str, allow_scripts: bool = Fals
 
 def _chat_file(job_dir: Path, clip: int) -> Path:
     return store.clip_dir(job_dir, clip) / "chat.json"
+
+
+def public_history(job_dir: Path, clip: int) -> dict:
+    """The conversation for the browser, without which model answered."""
+    data = history(job_dir, clip)
+    hidden = ("model", "tokens")
+    return {**data, "messages": [{k: v for k, v in m.items() if k not in hidden} for m in data["messages"]]}
 
 
 def history(job_dir: Path, clip: int) -> dict:
@@ -231,9 +252,8 @@ def not_ready_notice(engine: dict) -> str:
     if engine["provider"] == "claude-code":
         if os.environ.get("TETCLIPPER_AUTH", "").lower() == "supabase":
             return "Chat isn't set up yet. The admin needs to choose an AI model under ✦ AI model."
-        return ("Claude Code isn't installed on this machine. Install it and run `claude` once to sign in, "
-                "or pick an API model under ✦ AI model.")
-    return f"No API key is set for {engine['label']}. The admin can add one under ✦ AI model."
+        return "The AI on this PC isn't set up. Sign it in, or pick an API model under ✦ AI model."
+    return "No API key is set for the AI. The admin can add one under ✦ AI model."
 
 
 _busy: set[str] = set()
@@ -261,7 +281,7 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
         raise RuntimeError("save_spec is required for API chat.")
     with _lock:
         if key in _busy:
-            raise RuntimeError("Claude is still working on the last message.")
+            raise RuntimeError("AI is still working on the last message.")
         _busy.add(key)
 
     cwd = store.clip_dir(job_dir, clip)
@@ -312,11 +332,11 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
                     elif block.get("type") == "tool_use":
                         emit("tool", text=_tool_note(block))
             elif kind == "result" and ev.get("is_error"):
-                error = ev.get("result") or ev.get("subtype") or "Claude stopped with an error."
+                error = ev.get("result") or ev.get("subtype") or "The AI stopped with an error."
         code = child.wait()
         if code != 0 and not replies and error is None:
             err = (child.stderr.read() if child.stderr else "")[-400:]
-            error = err.strip() or f"claude exited with code {code}"
+            error = err.strip() or f"the AI exited with code {code}"
         return session_id, replies, error
 
     def work_api() -> None:
@@ -329,6 +349,7 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
                 past.pop(0)
             replies, error, meta = agent.run_turn(job_dir, clip, title, context_line(ctx) + message, past, emit, save_spec)
         except Exception as exc:  # noqa: BLE001 — always end the turn
+            log.exception("studio chat turn failed")
             error = f"The AI agent failed: {exc}"
         finally:
             latest = history(job_dir, clip)
@@ -336,11 +357,13 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
                 latest["messages"].append({"role": "assistant", "text": "\n\n".join(replies), "ts": time.time(),
                                            "model": meta.get("model"), "cost": meta.get("cost"), "tokens": meta.get("tokens")})
             if error:
+                log.warning("studio chat error: %s", error)
+                error = agent.public_error(error)
                 latest["messages"].append({"role": "error", "text": error, "ts": time.time()})
             _save(job_dir, clip, latest)
             with _lock:
                 _busy.discard(key)
-            emit("done", error=error, model=meta.get("model"), cost=meta.get("cost"))
+            emit("done", error=error, cost=meta.get("cost"))
 
     def work() -> None:
         session_id = data.get("session_id")
@@ -362,13 +385,15 @@ def send(job_dir: Path, clip: int, title: str, message: str, ctx: dict | None,
                 if problems:
                     error = "The edit didn't validate and was undone: " + "; ".join(problems[:3])
         except OSError as exc:
-            error = f"Couldn't start Claude Code: {exc}"
+            error = f"Couldn't start the AI: {exc}"
         finally:
             latest = history(job_dir, clip)
             latest["session_id"] = session_id
             if replies:
                 latest["messages"].append({"role": "assistant", "text": "\n\n".join(replies), "ts": time.time()})
             if error:
+                log.warning("studio chat error: %s", error)
+                error = agent.public_error(error)
                 latest["messages"].append({"role": "error", "text": error, "ts": time.time()})
             _save(job_dir, clip, latest)
             with _lock:

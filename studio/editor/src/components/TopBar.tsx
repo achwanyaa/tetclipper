@@ -67,7 +67,7 @@ export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme,
 
       {open && <span className="saved">{saving ? 'Saving…' : 'Saved'}</span>}
       {open && (
-        <button onClick={onUndo} disabled={!canUndo} title="Undo the last change (yours or Claude's)">
+        <button onClick={onUndo} disabled={!canUndo} title="Undo the last change (yours or the AI's)">
           ↶ Undo
         </button>
       )}

@@ -66,6 +66,7 @@ function resolveAssets(spec, base) {
   const out = structuredClone(spec)
   out.source.src = url(out.source.src)
   if (out.intro) out.intro.src = url(out.intro.src)
+  if (out.outro) out.outro.src = url(out.outro.src)
   if (out.music) out.music.src = url(out.music.src)
   if (out.matte) out.matte.src = url(out.matte.src)
   for (const e of out.effects ?? []) if ((e.type === 'image' || e.type === 'background') && e.src) e.src = url(e.src)

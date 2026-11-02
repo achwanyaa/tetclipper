@@ -11,9 +11,9 @@ interface Props {
   onUndo: () => void
 }
 
-/** Claude as a command bar under the timeline: the latest reply, the input and
+/** The AI as a command bar under the timeline: the latest reply, the input and
  *  quick asks. The whole conversation lives in the History drawer. */
-export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
+export function AiBar({ data, editor, canUndo, onUndo }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(data.chat.messages)
   const [busy, setBusy] = useState(data.chat.busy)
   const [live, setLive] = useState('')
@@ -32,11 +32,11 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
           setLive('')
         } else if (ev.kind === 'tool') setNotes((n) => [...n.slice(-3), ev.text ?? ''])
         else if (ev.kind === 'done') {
-          // API providers report the model and what the turn cost.
-          if (ev.model)
+          // API providers report what the turn cost.
+          if (ev.cost != null)
             setMessages((m) => {
               const i = m.map((x) => x.role).lastIndexOf('assistant')
-              return i < 0 ? m : m.map((x, k) => (k === i ? { ...x, model: ev.model, cost: ev.cost ?? null } : x))
+              return i < 0 ? m : m.map((x, k) => (k === i ? { ...x, cost: ev.cost } : x))
             })
           if (ev.error) setMessages((m) => [...m, { role: 'error', text: ev.error ?? '' }])
           setBusy(false)
@@ -66,28 +66,26 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
     }
   }
 
-  // Older desktop servers don't report the engine: they only run Claude Code.
-  const engine = data.chat.engine ?? { provider: 'claude-code', model: '', label: 'Claude Code', ready: true }
   const last = [...messages].reverse().find((m) => m.role !== 'user')
   const ctxLabel = editor.selection ? `words ${editor.selection[0]}–${editor.selection[1]}` : editor.playhead !== null ? `at ${fmt(editor.playhead)}` : 'at start'
-  const status = busy ? live.trim() || notes[notes.length - 1] || 'Claude is editing…' : last?.text ?? 'Ask Claude to change anything. It edits this clip and the preview updates live.'
+  const status = busy ? live.trim() || notes[notes.length - 1] || 'AI is editing…' : last?.text ?? 'Ask AI to change anything. It edits this clip and the preview updates live.'
 
   return (
-    <div className="card claude-bar">
+    <div className="card ai-bar">
       <div className="last">
-        <span className="avatar-c">C</span>
+        <span className="avatar-c">✦</span>
         <span className={`text ${!busy && !last ? 'mu' : ''}`} style={last?.role === 'error' && !busy ? { color: 'var(--dg)' } : undefined} title={status}>
           {status}
         </span>
         {busy && (
-          <span className="typing" aria-label="Claude is working">
+          <span className="typing" aria-label="AI is working">
             <span />
             <span />
             <span />
           </span>
         )}
-        <span className="who" title="The AI model the admin chose">
-          {last?.model ?? (data.chat.available ? engine.label : 'not set up')}
+        <span className="who">
+          {data.chat.available ? 'AI' : 'not set up'}
           {!busy && last?.cost != null ? ` · $${last.cost < 0.01 ? last.cost.toFixed(4) : last.cost.toFixed(3)}` : ''}
         </span>
         {!busy && last?.role === 'assistant' && canUndo && (
@@ -102,10 +100,7 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
 
       {!data.chat.available && (
         <span className="warn">
-          {data.chat.notice ??
-            (engine.provider === 'claude-code'
-              ? "Claude Code isn't installed on this machine. Install it and run `claude` once to sign in, or pick an API model under ✦ AI model."
-              : `No API key is set for ${engine.label}. The admin can add one under ✦ AI model.`)}
+          {data.chat.notice ?? 'The AI chat is not set up yet. The admin can choose a model under ✦ AI model.'}
         </span>
       )}
 
@@ -115,8 +110,8 @@ export function ClaudeBar({ data, editor, canUndo, onUndo }: Props) {
           send(input)
         }}
       >
-        <input type="text" placeholder={busy ? 'Claude is editing…' : 'Ask Claude to change anything… “make the captions bigger”'} value={input} onChange={(e) => setInput(e.target.value)} />
-        <button type="button" className={`ctx ${withContext ? 'on' : ''}`} onClick={() => setWithContext((w) => !w)} title="Tell Claude where the playhead is and which words are selected">
+        <input type="text" placeholder={busy ? 'AI is editing…' : 'Ask AI to change anything… “make the captions bigger”'} value={input} onChange={(e) => setInput(e.target.value)} />
+        <button type="button" className={`ctx ${withContext ? 'on' : ''}`} onClick={() => setWithContext((w) => !w)} title="Tell the AI where the playhead is and which words are selected">
           {withContext ? ctxLabel : 'no context'}
         </button>
         <button className="primary" disabled={busy || !input.trim()}>
@@ -175,13 +170,13 @@ function History({ messages, live, notes, busy, onClose, onReset }: HistoryProps
     <div className="drawer-backdrop" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
         <header>
-          <b>Claude · this clip</b>
+          <b>AI · this clip</b>
           <button className="link muted" onClick={onClose}>
             Close
           </button>
         </header>
         <div className="row small muted">
-          <label className="toggle" title="Let Claude write and run Python/Node scripts on this PC (in the clip's scripts/ folder). It can then run any code your user account can, so only turn it on if you're comfortable with that.">
+          <label className="toggle" title="Let the AI write and run Python/Node scripts on this PC (in the clip's scripts/ folder). It can then run any code your user account can, so only turn it on if you're comfortable with that.">
             <input
               type="checkbox"
               checked={scripts}
@@ -195,7 +190,7 @@ function History({ messages, live, notes, busy, onClose, onReset }: HistoryProps
                 }
               }}
             />
-            Let Claude run scripts
+            Let the AI run scripts
           </label>
           <span className="spacer" />
           <button className="sm" disabled={busy || messages.length === 0} onClick={onReset}>

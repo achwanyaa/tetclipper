@@ -115,7 +115,7 @@ export function SignIn({ setPasswordMode = false, onPasswordSet }: { setPassword
             <br />
             Vertical clips out.
           </b>
-          <span>Captions in English, Swahili and Sheng. Claude edits with you.</span>
+          <span>Captions in English, Swahili and Sheng. AI edits with you.</span>
         </div>
       </div>
     </div>

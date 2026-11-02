@@ -186,7 +186,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
     }
   }, [open, loadClip])
 
-  // Server events: live spec changes (Claude, undo), pipeline progress.
+  // Server events: live spec changes (AI, undo), pipeline progress.
   useEffect(
     () =>
       onEvent((ev) => {
@@ -295,7 +295,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
         saving={saving}
         canUndo={(data?.history.length ?? 0) > 1}
         theme={theme}
-        engine={ai ? (ai.providers.find((p) => p.id === ai.provider)?.kind === 'cli' ? 'Claude Code' : ai.model) : null}
+        engine={ai ? (ai.providers.find((p) => p.id === ai.provider)?.kind === 'cli' ? ai.providers.find((p) => p.id === ai.provider)?.label ?? 'AI' : ai.model) : null}
         onAi={() => setAiOpen(true)}
         account={account}
         onSignOut={onSignOut}

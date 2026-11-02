@@ -69,9 +69,9 @@ def answer(job_dir: Path, emit: Callable[[float, str], None]) -> None:
     if claude is None:
         if os.environ.get("TETCLIPPER_AUTH", "").lower() == "supabase":
             raise RuntimeError("Finding moments needs an AI model. The admin can choose one under ✦ AI model.")
-        raise RuntimeError("Finding moments needs the Claude Code CLI logged in on this machine, or an API model under ✦ AI model.")
+        raise RuntimeError("Finding moments needs the AI signed in on this PC, or an API model under ✦ AI model.")
     count = len(request.get("items", request.get("prompts", [])) or [])
-    emit(-1, f"Claude is judging {count or 'the'} moments…")
+    emit(-1, f"AI is judging {count or 'the'} moments…")
     child = subprocess.run(
         [claude, "-p", "--output-format", "json", "--max-turns", "40", "--allowedTools", *ALLOWED_TOOLS],
         input=prompt(job_dir.name), cwd=job_dir, env={**os.environ, "UV_PROJECT": str(PIPELINE_DIR)},
@@ -83,7 +83,7 @@ def answer(job_dir: Path, emit: Callable[[float, str], None]) -> None:
     except ValueError:
         result = {}
     if child.returncode != 0 or result.get("is_error"):
-        raise RuntimeError(result.get("result") or child.stderr[-400:] or "Claude Code stopped with an error")
+        raise RuntimeError(result.get("result") or child.stderr[-400:] or "The AI stopped with an error")
     emit(-1, (result.get("result") or "Judged.").strip()[:120])
 
 
