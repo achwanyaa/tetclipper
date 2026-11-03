@@ -274,12 +274,10 @@ def _preview_state(job_dir: Path, spec: dict) -> tuple[str | None, bool]:
         _previews_making.add(key)
 
     def work() -> None:
-        src = None
         _job_started()  # a tab may close meanwhile: keep the container up until it's done
         try:
             with _one_preview_at_a_time:
                 preview.make(media, out, int(spec["source"].get("width", 1920)), int(spec["source"].get("height", 1080)))
-            src = preview.NAME
         except Exception as err:  # noqa: BLE001 — the original still plays, just slowly
             log.warning("preview copy failed for %s: %s", job_dir.name, err)
             with _previews_lock:
@@ -288,10 +286,18 @@ def _preview_state(job_dir: Path, spec: dict) -> tuple[str | None, bool]:
             _job_ended()
             with _previews_lock:
                 _previews_making.discard(key)
-        events.publish({"event": "preview", "job_id": job_dir.name, "src": src}, job_dir.parents[1])
 
     threading.Thread(target=work, daemon=True).start()
     return None, True
+
+
+@command
+def studio_preview(jobId: str, clip: int = 0) -> dict:
+    """Is the light copy ready? The editor asks while it waits: a live event can be
+    lost on the slow connections the copy is for."""
+    job_dir = _job_dir(jobId)
+    src, making = _preview_state(job_dir, store.load(job_dir, clip) or {"source": {"src": ""}})
+    return {"preview": src, "previewing": making}
 
 
 @command

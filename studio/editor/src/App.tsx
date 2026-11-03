@@ -188,6 +188,22 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
     }
   }, [open, loadClip])
 
+  // The light preview copy is being made: switch to it as soon as it's there.
+  const waitingFor = data?.previewing ? data.jobId : null
+  const waitingClip = data?.clip ?? 0
+  useEffect(() => {
+    if (!waitingFor) return
+    const timer = window.setInterval(() => {
+      if (!isAwake()) return
+      invoke<{ preview: string | null; previewing: boolean }>('studio_preview', { jobId: waitingFor, clip: waitingClip })
+        .then((p) => {
+          if (!p.previewing) setData((d) => (d && d.jobId === waitingFor ? { ...d, preview: p.preview, previewing: false } : d))
+        })
+        .catch(() => undefined)
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [waitingFor, waitingClip])
+
   // Back after a pause in the event stream: if the server restarted meanwhile the
   // gap can't be replayed, so re-read what could have changed.
   const dataRef = useRef(data)
@@ -222,9 +238,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
     () =>
       onEvent((ev) => {
         const cur = openRef.current
-        if (ev.event === 'preview') {
-          setData((d) => (d && d.jobId === ev.job_id ? { ...d, preview: ev.src, previewing: false } : d))
-        } else if (ev.event === 'spec' && cur && ev.job_id === cur.jobId && ev.clip === cur.clip) {
+        if (ev.event === 'spec' && cur && ev.job_id === cur.jobId && ev.clip === cur.clip) {
           if (ev.source !== 'editor') setSpec(ev.spec)
           setData((d) => (d ? { ...d, history: [...d.history.filter((h) => !ev.history.some((n) => n.version === h.version)), ...ev.history] } : d))
         } else if (ev.event === 'job' && (runRef.current?.kind === 'cut' || runRef.current?.kind === 'find')) {

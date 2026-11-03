@@ -1,6 +1,8 @@
 """The online server (TETCLIPPER_AUTH=supabase): sign-in required, a private
 workspace per user, media tokens only for files/events, AI model admin-only.
 Supabase is replaced by a stand-in token check (no network)."""
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -141,6 +143,30 @@ def test_clip_cards_get_a_real_frame_framed_like_the_clip(client, monkeypatch):
     pixel = subprocess.run([exe, "-v", "error", "-i", str(job / "studio" / "clip_00" / "thumb.jpg"), "-vf",
                             "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
     assert pixel[2] > 150 and pixel[0] < 80  # blue: framed where the camera points
+
+
+def test_the_desktop_app_plays_the_original(client):
+    c, _ = client
+    assert cmd(c, "studio_preview", "token-a", jobId="job1", clip=0).json() == {"preview": None, "previewing": False}
+
+
+def test_online_the_light_copy_is_made_once_and_then_used(client, monkeypatch):
+    from tetclipper_pipeline.spec import preview
+
+    c, job = client
+    monkeypatch.setenv("TETCLIPPER_GPU_FUNCTIONS", "1")
+    made = []
+    monkeypatch.setattr(preview, "make", lambda media, out, w, h: (made.append(out.name), out.write_bytes(b"copy")))
+    first = cmd(c, "studio_clip", "token-a", jobId="job1", clip=0).json()
+    assert first["preview"] is None and first["previewing"] is True
+    for _ in range(200):
+        state = cmd(c, "studio_preview", "token-a", jobId="job1", clip=0).json()
+        if state["preview"]:
+            break
+        time.sleep(0.01)
+    assert state == {"preview": "preview.mp4", "previewing": False}
+    assert made == ["preview.mp4"]
+    assert cmd(c, "studio_clip", "token-a", jobId="job1", clip=0).json()["preview"] == "preview.mp4"
 
 
 def test_users_are_never_told_which_ai_answers(client):

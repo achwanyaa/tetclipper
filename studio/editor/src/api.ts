@@ -233,7 +233,6 @@ export type ServerEvent =
   | { event: 'progress'; stage: string; fraction: number; message: string }
   | { event: 'result'; ok: boolean; job_id?: string; clip?: number; error?: string; output?: unknown }
   | { event: 'exited'; code: number }
-  | { event: 'preview'; job_id: string; src: string | null }
   | { event: 'spec'; job_id: string; clip: number; spec: ClipSpecInput; source: string; history: HistoryEntry[] }
   | { event: 'studio-chat'; job_id: string; clip: number; kind: 'text' | 'delta' | 'tool' | 'done'; text?: string; error?: string | null; cost?: number | null }
 
