@@ -5,13 +5,14 @@ import { signOut, useSession } from './auth'
 import { AiSettings } from './components/AiSettings'
 import { Canvas } from './components/Canvas'
 import { Home } from './components/Home'
-import { NewClip, type CutArgs, type FindArgs } from './components/NewClip'
+import { NewClip, type CutArgs, type LongArgs, type FindArgs } from './components/NewClip'
 import { SignIn } from './components/SignIn'
 import { TopBar, type Step } from './components/TopBar'
 import { useTheme } from './theme'
 
 export interface Run {
   kind: 'cut' | 'find' | 'render'
+  title?: string
   jobId?: string
   clip?: number
   fraction: number
@@ -221,7 +222,9 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
     () =>
       onEvent((ev) => {
         const cur = openRef.current
-        if (ev.event === 'spec' && cur && ev.job_id === cur.jobId && ev.clip === cur.clip) {
+        if (ev.event === 'preview') {
+          setData((d) => (d && d.jobId === ev.job_id ? { ...d, preview: ev.src, previewing: false } : d))
+        } else if (ev.event === 'spec' && cur && ev.job_id === cur.jobId && ev.clip === cur.clip) {
           if (ev.source !== 'editor') setSpec(ev.spec)
           setData((d) => (d ? { ...d, history: [...d.history.filter((h) => !ev.history.some((n) => n.version === h.version)), ...ev.history] } : d))
         } else if (ev.event === 'job' && (runRef.current?.kind === 'cut' || runRef.current?.kind === 'find')) {
@@ -291,12 +294,12 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
     }
   }, [open])
 
-  const startJob = useCallback(async (kind: 'cut' | 'find', args: CutArgs | FindArgs) => {
-    setRun({ kind, fraction: 0, message: 'Starting…' })
+  const startJob = useCallback(async (kind: 'cut' | 'find' | 'long', args: CutArgs | FindArgs | LongArgs) => {
+    setRun(kind === 'long' ? { kind: 'cut', title: 'Preparing the full video', fraction: 0, message: 'Starting…' } : { kind, fraction: 0, message: 'Starting…' })
     setOpen(null)
     setScreen('home')
     try {
-      await invoke(kind === 'cut' ? 'studio_cut' : 'studio_find', { ...args })
+      await invoke(kind === 'long' ? 'studio_long' : kind === 'cut' ? 'studio_cut' : 'studio_find', { ...args })
     } catch (e) {
       setRun((r) => (r ? { ...r, error: String((e as Error).message ?? e) } : r))
     }
@@ -374,7 +377,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
           </div>
         )
       ) : screen === 'new' ? (
-        <NewClip busy={jobBusy} online={!!account} onCut={(a) => startJob('cut', a)} onFind={(a) => startJob('find', a)} />
+        <NewClip busy={jobBusy} online={!!account} onCut={(a) => startJob('cut', a)} onFind={(a) => startJob('find', a)} onLong={(a) => startJob('long', a)} />
       ) : (
         <Home
           jobs={jobs}

@@ -4,7 +4,7 @@ import { Captions } from './captions/Captions'
 import { Overlays } from './effects/Overlays'
 import { Bookends } from './Bookend'
 import { musicGains, musicRange } from './music'
-import { FPS, clipSpecSchema, type ClipSpec, type ClipSpecInput } from './spec'
+import { FPS, clipSpecSchema, frameSize, type ClipSpec, type ClipSpecInput } from './spec'
 import { buildTimeline } from './timeline'
 import { CutTransitions, SpeakerLayer, VideoLayer } from './VideoLayer'
 
@@ -42,5 +42,6 @@ export const clipDurationInFrames = (spec: ClipSpecInput) =>
 
 export const calculateClipMetadata: CalculateMetadataFunction<ClipSpecInput> = ({ props }) => ({
   durationInFrames: clipDurationInFrames(props),
-  fps: FPS
+  fps: FPS,
+  ...frameSize(clipSpecSchema.parse(props).format)
 })

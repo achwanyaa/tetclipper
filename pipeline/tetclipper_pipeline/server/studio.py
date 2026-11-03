@@ -8,6 +8,7 @@ is pushed to the browser as {"event": "spec", job_id, clip, spec}.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -19,7 +20,7 @@ from typing import Any
 
 from ..spec import store
 from . import agent, studio_chat
-from .app import CommandError, _read_json, _SAFE_NAME, command, events, home_dir, is_admin, stream_pipeline, workspace_dir
+from .app import _job_ended, _job_started, CommandError, _read_json, _SAFE_NAME, command, events, home_dir, is_admin, stream_pipeline, workspace_dir
 
 STUDIO_DIST = Path(os.environ.get("TETCLIPPER_STUDIO_DIST") or Path(__file__).resolve().parents[3] / "studio" / "editor" / "dist")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -27,7 +28,9 @@ AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 
 
-THUMB_W, THUMB_H = 360, 640
+log = logging.getLogger(__name__)
+
+THUMB_VERTICAL, THUMB_LANDSCAPE = (360, 640), (640, 360)
 
 
 def _thumb_inputs(job_dir: Path, clip: int) -> list[Path]:
@@ -58,7 +61,7 @@ def _crop_at(spec: dict, t: float) -> dict:
 
 
 def thumbnail(job_id: str, clip: int) -> Path | None:
-    """A 9:16 frame of the clip as it will look, kept next to its spec and
+    """A frame of the clip as it will look, kept next to its spec and
     remade when the spec or render changes: from the render when there is
     one, else the source framed by the clip's camera path a second in."""
     from ..render import ffmpeg_bin
@@ -67,6 +70,7 @@ def thumbnail(job_id: str, clip: int) -> Path | None:
     spec = store.load(job_dir, clip)
     if spec is None:
         return None
+    THUMB_W, THUMB_H = THUMB_LANDSCAPE if spec.get("format") == "landscape" else THUMB_VERTICAL
     out = store.clip_dir(job_dir, clip) / "thumb.jpg"
     if out.exists() and out.stat().st_mtime >= _thumb_version(job_dir, clip):
         return out
@@ -242,6 +246,54 @@ def studio_jobs() -> list[dict]:
     return out
 
 
+_previews_making: set[str] = set()
+_previews_failed: set[str] = set()
+_previews_lock = threading.Lock()
+_one_preview_at_a_time = threading.Semaphore(1)  # the web server has one CPU
+
+
+def _preview_state(job_dir: Path, spec: dict) -> tuple[str | None, bool]:
+    """(light preview copy's src if it exists, whether one is being made). Online
+    only: on the desktop the original is a local file. Opening a clip starts the
+    copy, so videos nobody edits never cost anything."""
+    from ..cloud import client
+    from ..spec import preview
+
+    if not client.hosted():
+        return None, False
+    out = job_dir / preview.NAME
+    if out.exists():
+        return preview.NAME, False
+    media = job_dir / spec["source"]["src"]
+    key = str(job_dir)
+    with _previews_lock:
+        if key in _previews_failed or not media.exists():
+            return None, False
+        if key in _previews_making:
+            return None, True
+        _previews_making.add(key)
+
+    def work() -> None:
+        src = None
+        _job_started()  # a tab may close meanwhile: keep the container up until it's done
+        try:
+            with _one_preview_at_a_time:
+                preview.make(media, out, int(spec["source"].get("width", 1920)), int(spec["source"].get("height", 1080)))
+            src = preview.NAME
+        except Exception as err:  # noqa: BLE001 — the original still plays, just slowly
+            log.warning("preview copy failed for %s: %s", job_dir.name, err)
+            with _previews_lock:
+                _previews_failed.add(key)
+        finally:
+            _job_ended()
+            with _previews_lock:
+                _previews_making.discard(key)
+        events.publish({"event": "preview", "job_id": job_dir.name, "src": src}, job_dir.parents[1])
+
+    threading.Thread(target=work, daemon=True).start()
+    return None, True
+
+
 @command
 def studio_clip(jobId: str, clip: int = 0) -> dict:
     job_dir = _job_dir(jobId)
@@ -253,12 +305,15 @@ def studio_clip(jobId: str, clip: int = 0) -> dict:
     engine = agent.engine_label()
     available = engine["ready"] and (engine["provider"] != "claude-code" or studio_chat.find_claude() is not None)
     notice = None if available else studio_chat.not_ready_notice(engine)
+    preview_src, previewing = _preview_state(job_dir, spec)
     return {
         "jobId": job_dir.name,
         "jobDir": str(job_dir),
         "clip": clip,
         "title": _title(job_dir),
         "spec": spec,
+        "preview": preview_src,
+        "previewing": previewing,
         "history": _public_history(job_dir, clip),
         "chat": {**studio_chat.public_history(job_dir, clip), "busy": studio_chat.busy(job_dir, clip),
                  "available": available, "notice": notice},
@@ -331,6 +386,18 @@ def studio_find(source: str, start: float | None = None, end: float | None = Non
     args += ["--top", str(top)]
     if captions:
         args += ["--captions", captions]
+    if language:
+        args += ["--language", language]
+    stream_pipeline(args + _where(cloud))
+
+
+@command
+def studio_long(source: str, start: float | None = None, end: float | None = None,
+                language: str | None = None, cloud: bool | None = None) -> None:
+    """A full horizontal video: fetch it, transcribe it, make it one project."""
+    args = ["long", source]
+    if start is not None and end is not None:
+        args += ["--start", str(start), "--end", str(end)]
     if language:
         args += ["--language", language]
     stream_pipeline(args + _where(cloud))

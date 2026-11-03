@@ -67,7 +67,7 @@ function BookendCard({ side, data, spec, update, setError, timeline, previewFram
       </div>
       <div className="intro-panel">
         <label
-          className={`drop ${over ? 'over' : ''}`}
+          className={`drop ${spec.format ?? 'vertical'} ${over ? 'over' : ''}`}
           onDragOver={(e) => {
             e.preventDefault()
             setOver(true)

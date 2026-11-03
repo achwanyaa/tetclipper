@@ -7,8 +7,10 @@ from __future__ import annotations
 import json
 import os
 import queue as queue_mod
+import shutil
 import subprocess
 import threading
+import wave
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -104,7 +106,8 @@ def build_spec(job_id: str, clip: int, captions: str | None, glossary_data: dict
     return {"clip": clip}
 
 
-from ..spec.timeline import FPS, _bookend_frames, intro_on_screen, outro_start, segments, total_frames  # noqa: E402 — shared with spec/music.py
+from ..spec.long_video import base_filter, is_long_video, overlay_filter, remotion_ranges  # noqa: E402
+from ..spec.timeline import FPS, _bookend_frames, outro_start, segments, total_frames  # noqa: E402 — shared with spec/music.py
 
 
 RATE = 48000
@@ -206,6 +209,187 @@ def _mix_bookends(spec: dict, job_dir: Path, speech: Path, out: Path) -> bool:
     return True
 
 
+def _exact_speech(spec: dict, media: Path, out: Path, tmp: Path, total: int) -> None:
+    """The kept source audio, sample-exact to the video's frames, from a single
+    decode: a long video can have hundreds of cuts, and a filter per cut would
+    decode the file again for each one."""
+    raw = tmp / "source.raw"
+    run = subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(media), "-vn", "-af", "aresample=first_pts=0",
+         "-f", "s16le", "-ac", "2", "-ar", str(RATE), str(raw)],
+        capture_output=True, text=True,
+    )
+    if run.returncode != 0:
+        raise RuntimeError(run.stderr[-600:])
+    per_frame = RATE // FPS
+    size = 4  # bytes per stereo sample
+    silence = bytes(size * 65536)
+
+    def write_silence(wav, samples: int) -> None:
+        while samples > 0:
+            step = min(samples, 65536)
+            wav.writeframesraw(silence[:step * size])
+            samples -= step
+
+    intro, segs = segments(spec)
+    with wave.open(str(out), "wb") as wav, open(raw, "rb") as src:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(RATE)
+        write_silence(wav, intro * per_frame)
+        written = intro
+        for start, frames in segs:
+            src.seek(int(round(start * RATE)) * size)
+            left = frames * per_frame
+            while left > 0:
+                data = src.read(min(left * size, 1 << 20))
+                if not data:
+                    break
+                wav.writeframesraw(data)
+                left -= len(data) // size
+            write_silence(wav, left)  # the file's audio ended early
+            written += frames
+        write_silence(wav, max(0, total - written) * per_frame)
+    raw.unlink(missing_ok=True)
+
+
+def _soundtrack(spec: dict, job_dir: Path, tmp: Path, total: int) -> None:
+    """tmp/audio.wav: intro silence + the kept source segments, cut to the same
+    frame-exact lengths the video uses, padded through the outro, then the sound
+    of intro/outro videos and the music bed."""
+    media = job_dir / spec["source"]["src"]
+    if is_long_video(spec):
+        _exact_speech(spec, media, tmp / "speech.wav", tmp, total)
+    else:
+        intro, segs = segments(spec)
+        parts = [
+            f"[0:a]atrim=start={st:.6f}:duration={n / FPS:.6f},asetpts=PTS-STARTPTS[s{i}]"
+            for i, (st, n) in enumerate(segs)
+        ]
+        chain = "".join(f"[s{i}]" for i in range(len(segs))) + f"concat=n={len(segs)}:v=0:a=1[cat]"
+        delay = f";[cat]adelay=delays={intro * 1000 // FPS}:all=1,apad[out]" if intro else ";[cat]apad[out]"
+        run = subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(media), "-filter_complex",
+             ";".join(parts) + ";" + chain + delay, "-map", "[out]", "-ar", str(RATE), "-ac", "2",
+             "-t", f"{total / FPS:.6f}", str(tmp / "speech.wav")],
+            capture_output=True, text=True,
+        )
+        if run.returncode != 0:
+            raise RuntimeError(run.stderr[-600:])
+    if _mix_bookends(spec, job_dir, tmp / "speech.wav", tmp / "voices.wav"):
+        (tmp / "voices.wav").replace(tmp / "speech.wav")
+    if spec.get("music"):
+        _mix_music(spec, job_dir, tmp / "speech.wav", tmp / "audio.wav", total)
+    else:
+        (tmp / "speech.wav").replace(tmp / "audio.wav")
+
+
+def _render_mostly_plain(job_dir: str, clip: int, chunk_map: Callable, spec: dict, total: int,
+                         extra: list[tuple[int, int]]) -> Iterator[dict]:
+    """A long video with few effects: Remotion only for the frames that need it
+    (spec/long_video.py), overlaid during one ffmpeg encode of the source."""
+    import tempfile
+    import time
+
+    t0 = time.time()
+    clip_dir = Path(job_dir) / "studio" / f"clip_{clip:02d}"
+
+    def progress(fraction: float, message: str) -> dict:
+        return {"event": "progress", "stage": "render", "fraction": fraction, "message": message}
+
+    chunks = [(a + first, a + last) for a, b in extra for first, last in chunk_ranges(b - a + 1)]
+    frames = sum(b - a + 1 for a, b in extra)
+    timings: dict[str, float] = {}
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        audio_err: list[str] = []
+
+        def audio() -> None:
+            a0 = time.time()
+            try:
+                _soundtrack(spec, Path(job_dir), tmp, total)
+            except Exception as err:  # noqa: BLE001
+                audio_err.append(str(err)[-600:])
+            timings["audio"] = round(time.time() - a0, 1)
+
+        audio_thread = threading.Thread(target=audio, daemon=True)
+        audio_thread.start()
+
+        args = ["ffmpeg", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats",
+                "-i", str(Path(job_dir) / spec["source"]["src"])]
+        if chunks:
+            yield progress(0.02, f"Rendering effects: {frames} of {total} frames…")
+            try:
+                names = []
+                for i, data in enumerate(chunk_map([(job_dir, clip, a, b) for a, b in chunks])):
+                    name = tmp / f"chunk_{i:03d}.mp4"
+                    name.write_bytes(data)
+                    names.append(name)
+                    yield progress(0.02 + 0.18 * (i + 1) / len(chunks), f"Rendered effects {i + 1}/{len(chunks)}")
+            except Exception as err:  # noqa: BLE001
+                yield {"event": "result", "ok": False, "error": f"chunk render failed: {err}"}
+                return
+            listing = tmp / "chunks.txt"
+            listing.write_text("".join(f"file '{p.as_posix()}'" + chr(10) for p in names))
+            joined = tmp / "effects.mp4"
+            join = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(listing),
+                                   "-c", "copy", str(joined)], capture_output=True, text=True)
+            if join.returncode != 0:
+                yield {"event": "result", "ok": False, "error": f"joining effects failed: {join.stderr[-600:]}"}
+                return
+            timings["effects"] = round(time.time() - t0, 1)
+            args += ["-i", str(joined)]
+        audio_thread.join()
+        if audio_err:
+            yield {"event": "result", "ok": False, "error": f"audio render failed: {audio_err[0]}"}
+            return
+
+        width, height = (1920, 1080)
+        graph = f"[0:v]{base_filter(spec, width, height)}[base]"
+        if chunks:
+            timing, enable = overlay_filter(extra)
+            graph += f";[1:v]{timing}[fx];[base][fx]overlay=eof_action=pass:repeatlast=0:enable='{enable}',trim=end_frame={total}[v]"
+        else:
+            graph += f";[base]trim=end_frame={total}[v]"
+        out = tmp / "render.mp4"
+        args += ["-i", str(tmp / "audio.wav"), "-filter_complex", graph, "-map", "[v]", "-map", f"{2 if chunks else 1}:a",
+                 # The filter ends the video: -frames:v or -shortest would stop before
+                 # the encoder's buffered audio is written, losing the last second or two.
+                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+                 "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+                 "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)]
+        yield progress(0.22, "Encoding the video…")
+        e0 = time.time()
+        encode = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        assert encode.stdout is not None
+        errors: list[str] = []
+        drain = threading.Thread(target=lambda: errors.append(encode.stderr.read()), daemon=True)  # type: ignore[union-attr]
+        drain.start()
+        shown = 0.0
+        for line in encode.stdout:
+            if line.startswith("frame="):
+                try:
+                    done = int(line.split("=", 1)[1]) / max(1, total)
+                except ValueError:
+                    continue
+                if done - shown >= 0.02:
+                    shown = done
+                    yield progress(0.22 + 0.76 * min(1.0, done), f"Encoding the video… {round(done * 100)}%")
+        code = encode.wait()
+        drain.join()
+        if code != 0:
+            yield {"event": "result", "ok": False, "error": f"ffmpeg encode failed: {''.join(errors)[-600:]}"}
+            return
+        timings["encode"] = round(time.time() - e0, 1)
+        dest = clip_dir / "render.mp4"
+        part = clip_dir / "render.part.mp4"
+        shutil.copyfile(out, part)
+        part.replace(dest)
+    seconds = round(time.time() - t0, 1)
+    yield {"event": "result", "ok": True, "output": f"studio/clip_{clip:02d}/render.mp4", "seconds": seconds,
+           "fps": round(total / seconds, 1), "chunks": len(chunks), "timings": timings, "remotion_frames": frames}
+
+
 def chunk_ranges(total: int, max_chunks: int = 40, min_frames: int = 150) -> list[tuple[int, int]]:
     # Every chunk is a container that has to start: for short clips, fewer and
     # longer chunks cost less for the same frames, at a slightly slower render.
@@ -255,7 +439,14 @@ def render(job_dir: str, clip: int, chunk_map: Callable) -> Iterator[dict]:
     clip_dir = Path(job_dir) / "studio" / f"clip_{clip:02d}"
     spec = json.loads((clip_dir / "spec.json").read_text(encoding="utf-8"))
     total = total_frames(spec)
-    ranges = chunk_ranges(total)
+    long_video = is_long_video(spec)
+    if long_video:
+        extra = remotion_ranges(spec)
+        if extra != [(0, total - 1)]:
+            yield from _render_mostly_plain(job_dir, clip, chunk_map, spec, total, extra)
+            return
+    # An hour of frames would run into a chunk's time limit at the usual 40 chunks.
+    ranges = chunk_ranges(total, max_chunks=200) if long_video else chunk_ranges(total)
 
     def progress(fraction: float, message: str) -> dict:
         return {"event": "progress", "stage": "render", "fraction": fraction, "message": message}
@@ -268,35 +459,11 @@ def render(job_dir: str, clip: int, chunk_map: Callable) -> Iterator[dict]:
         timings: dict[str, float] = {}
 
         def audio() -> None:
-            # The soundtrack is intro silence + the kept source segments, cut to
-            # the same frame-exact lengths the video uses, padded through the outro.
             a0 = time.time()
-            intro, segs = segments(spec)
-            media = Path(job_dir) / spec["source"]["src"]
-            parts = [
-                f"[0:a]atrim=start={st:.6f}:duration={n / FPS:.6f},asetpts=PTS-STARTPTS[s{i}]"
-                for i, (st, n) in enumerate(segs)
-            ]
-            chain = "".join(f"[s{i}]" for i in range(len(segs))) + f"concat=n={len(segs)}:v=0:a=1[cat]"
-            delay = f";[cat]adelay=delays={intro * 1000 // FPS}:all=1,apad[out]" if intro else ";[cat]apad[out]"
-            run = subprocess.run(
-                ["ffmpeg", "-y", "-loglevel", "error", "-i", str(media), "-filter_complex",
-                 ";".join(parts) + ";" + chain + delay, "-map", "[out]", "-ar", "48000", "-ac", "2",
-                 "-t", f"{total / FPS:.6f}", str(tmp / "speech.wav")],
-                capture_output=True, text=True,
-            )
-            if run.returncode != 0:
-                audio_err.append(run.stderr[-600:])
-            else:
-                try:
-                    if _mix_bookends(spec, Path(job_dir), tmp / "speech.wav", tmp / "voices.wav"):
-                        (tmp / "voices.wav").replace(tmp / "speech.wav")
-                    if spec.get("music"):
-                        _mix_music(spec, Path(job_dir), tmp / "speech.wav", tmp / "audio.wav", total)
-                    else:
-                        (tmp / "speech.wav").replace(tmp / "audio.wav")
-                except Exception as err:  # noqa: BLE001
-                    audio_err.append(f"music: {err}")
+            try:
+                _soundtrack(spec, Path(job_dir), tmp, total)
+            except Exception as err:  # noqa: BLE001
+                audio_err.append(str(err)[-600:])
             timings["audio"] = round(time.time() - a0, 1)
 
         audio_thread = threading.Thread(target=audio, daemon=True)

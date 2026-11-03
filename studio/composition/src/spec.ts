@@ -243,6 +243,7 @@ const bookendSchema = z.object({
 export const clipSpecSchema = z.object({
   version: z.literal(SPEC_VERSION).default(SPEC_VERSION),
   title: z.string().optional(),
+  format: z.enum(['vertical', 'landscape']).default('vertical'), // 9:16 clip or full 16:9 video
   source: z.object({
     src: z.string(), // URL the Player/renderer can load the media from
     start: seconds,
@@ -331,3 +332,5 @@ export type CaptionStyle = (typeof CAPTION_STYLES)[number]
 export const FPS = 30
 export const WIDTH = 1080
 export const HEIGHT = 1920
+
+export const frameSize = (format: ClipSpec['format']) => (format === 'landscape' ? { width: HEIGHT, height: WIDTH } : { width: WIDTH, height: HEIGHT })

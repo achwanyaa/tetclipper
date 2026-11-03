@@ -27,6 +27,15 @@ interface Props {
   online: boolean // the hosted app: videos come from Google Drive
   onCut: (args: CutArgs) => void
   onFind: (args: FindArgs) => void
+  onLong: (args: LongArgs) => void
+}
+
+export interface LongArgs {
+  source: string
+  start?: number
+  end?: number
+  language: string
+  cloud: boolean
 }
 
 /** What's wrong with the pasted source before anything runs, if anything. */
@@ -46,7 +55,7 @@ const LANGUAGES: [string, string][] = [
 ]
 
 /** Step 1 · Video: pick the source and the range (or ask AI to find moments). */
-export function NewClip({ busy, online, onCut, onFind }: Props) {
+export function NewClip({ busy, online, onCut, onFind, onLong }: Props) {
   const [source, setSource] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -55,7 +64,7 @@ export function NewClip({ busy, online, onCut, onFind }: Props) {
   const [language, setLanguage] = useState('en')
   const [cloudOk, setCloudOk] = useState(false)
   const [cloud, setCloud] = useState(true)
-  const [mode, setMode] = useState<'range' | 'find'>('range')
+  const [mode, setMode] = useState<'range' | 'find' | 'long'>('range')
   const [top, setTop] = useState(5)
 
   useEffect(() => {
@@ -75,12 +84,14 @@ export function NewClip({ busy, online, onCut, onFind }: Props) {
     (mode === 'range'
       ? !!source.trim() && rangeOk && length >= 3 && length <= 600
       : !!source.trim() && (!rangeGiven || (rangeOk && length >= 60)))
+  const optionalRange = mode !== 'range'
   // Online the server has no GPU of its own: analysis always runs on the cloud GPU.
   const useCloud = online || (cloudOk && cloud)
 
   const submit = () => {
     if (!valid || busy) return
-    if (mode === 'range') onCut({ source: source.trim(), start, end, captions: style, language, cloud: useCloud })
+    if (mode === 'long') onLong({ source: source.trim(), ...(rangeGiven ? { start, end } : {}), language, cloud: useCloud })
+    else if (mode === 'range') onCut({ source: source.trim(), start, end, captions: style, language, cloud: useCloud })
     else onFind({ source: source.trim(), ...(rangeGiven ? { start, end } : {}), top, captions: style, language, cloud: useCloud })
   }
 
@@ -129,7 +140,7 @@ export function NewClip({ busy, online, onCut, onFind }: Props) {
                 <span>Paste a link above, then set the start and end on the right.</span>
               </>
             )}
-            <span className="mono">16:9 source → 9:16 clip</span>
+            <span className="mono">{mode === 'long' ? '16:9 source → 16:9 video' : '16:9 source → 9:16 clip'}</span>
           </div>
         </div>
       </div>
@@ -144,22 +155,26 @@ export function NewClip({ busy, online, onCut, onFind }: Props) {
             <button className={`mode-card ${mode === 'find' ? 'on' : ''}`} onClick={() => setMode('find')}>
               Find moments<span>AI finds the best parts and scores them.</span>
             </button>
+            <button className={`mode-card ${mode === 'long' ? 'on' : ''}`} onClick={() => setMode('long')}>
+              Full video<span>Edit a whole sermon into a horizontal YouTube video.</span>
+            </button>
           </div>
 
           <div className="field">
             <div className="range-grid">
               <label className="field">
-                <span className="label">From{mode === 'find' ? ' (optional)' : ''}</span>
+                <span className="label">From{optionalRange ? ' (optional)' : ''}</span>
                 <input placeholder="12:30" value={from} onChange={(e) => setFrom(e.target.value)} />
               </label>
               <label className="field">
-                <span className="label">To{mode === 'find' ? ' (optional)' : ''}</span>
+                <span className="label">To{optionalRange ? ' (optional)' : ''}</span>
                 <input placeholder="13:15" value={to} onChange={(e) => setTo(e.target.value)} />
               </label>
             </div>
             {from && to && !valid && source.trim() && (
               <span className="small hint">{mode === 'range' ? 'The range must be 3 s – 10 min.' : 'Search at least a minute.'}</span>
             )}
+            {mode === 'long' && !rangeGiven && <span className="small muted">No range means the whole video.</span>}
             {mode === 'find' && !rangeGiven && <span className="small muted">No range means the whole video (a long download).</span>}
           </div>
 
@@ -176,7 +191,7 @@ export function NewClip({ busy, online, onCut, onFind }: Props) {
             </div>
           )}
 
-          <div className="field">
+          {mode !== 'long' && <div className="field">
             <span className="label">Caption style</span>
             <div className={`style-strip ${allStyles ? 'all' : ''}`}>
               {strip.map((s) => (
@@ -192,7 +207,7 @@ export function NewClip({ busy, online, onCut, onFind }: Props) {
                 {allStyles ? 'fewer' : `all ${CAPTION_STYLES.length}`}
               </button>
             </span>
-          </div>
+          </div>}
 
           <div className="field">
             <span className="label">Speech language</span>

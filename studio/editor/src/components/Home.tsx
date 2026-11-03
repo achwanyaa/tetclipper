@@ -85,7 +85,7 @@ export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun
             ))}
             {showLocal && run && (
               <RunCard
-                title={run.kind === 'find' ? 'Finding moments' : run.kind === 'cut' ? 'Cutting a clip' : `Rendering clip ${(run.clip ?? 0) + 1}`}
+                title={run.title ?? (run.kind === 'find' ? 'Finding moments' : run.kind === 'cut' ? 'Cutting a clip' : `Rendering clip ${(run.clip ?? 0) + 1}`)}
                 fraction={run.fraction}
                 message={run.message}
                 error={run.error ?? null}

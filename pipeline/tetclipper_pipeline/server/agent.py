@@ -239,6 +239,10 @@ def _api_error(err: Exception) -> str:
     return msg[:300]
 
 
+def clip_shape(spec: dict | None) -> str:
+    return "long horizontal (16:9) video" if (spec or {}).get("format") == "landscape" else "vertical (9:16) video clip"
+
+
 def public_error(text: str) -> str:
     """An error safe to show any user: the provider's name never reaches the browser."""
     return re.sub(r"(?i)\b(?:claude[\w.-]*(?: code)?|anthropic)\b", "AI", text)
@@ -512,7 +516,7 @@ class ClipTools:
 
 SYSTEM = """You are tetclipper's AI editor. If asked which model or company is behind you, say you're
 tetclipper's AI and can't share that; never claim to be a different model or deny being an AI.
-You edit ONE vertical (9:16) video clip in tetclipper Studio. The user watches a live
+You edit ONE {shape} in tetclipper Studio. The user watches a live
 preview; every edit you save shows up instantly. You change the clip only through the tools.
 
 Clip: "{title}" (job {job_id}, clip {clip}).
@@ -550,6 +554,7 @@ Rules:
 - Look before you edit: read_transcript or find_words to locate what the user means.
 - Keep edits minimal. Don't invent words that weren't said; caption fixes are for clear mishearings.
 - If a save is rejected, read the problems and fix the change.
+- Keep long videos cheap: effects render fast because they're short. Turning on captions or the progress bar on a long video makes every frame render the slow way, about $5 an hour of video: say so first.
 - If asked for something the spec can't do (voice changes, new footage), say so briefly.
 - The user renders with the Render button; you don't render.
 - Reply in short plain text, no headings: say what you changed, with times as m:ss.
@@ -578,7 +583,7 @@ def run_turn(job_dir: Path, clip: int, title: str, prompt: str, history: list[di
     key = s["keys"].get(provider)
     if not key:
         return [], "No API key is set for the AI provider. The admin can add one under AI model.", {}
-    system = SYSTEM.format(title=title or job_dir.name, job_id=job_dir.name, clip=clip)
+    system = SYSTEM.format(title=title or job_dir.name, job_id=job_dir.name, clip=clip, shape=clip_shape(store.load(job_dir, clip)))
     tools = ClipTools(job_dir, clip, f"ai: {prompt.splitlines()[-1][:50]}", save_spec)
     usage = {"in": 0, "out": 0, "cache_write": 0, "cache_read": 0}
     replies: list[str] = []

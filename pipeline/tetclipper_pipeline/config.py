@@ -125,6 +125,8 @@ class Settings:
     # Speech language for transcription ("en", "sw", …); None = auto-detect
     # from the first 30 s, which misfires on short slices of mixed speech.
     language: str | None = None
+    # A full horizontal video instead of a clip: speech analysis only, no camera.
+    long_video: bool = False
 
     def to_json(self) -> dict:
         return {
@@ -136,6 +138,7 @@ class Settings:
             "laughter_specialist": self.laughter_specialist,
             "section": self.section,
             "language": self.language,
+            "long_video": self.long_video,
         }
 
     @classmethod
@@ -150,4 +153,5 @@ class Settings:
             laughter_specialist=data.get("laughter_specialist", False),
             section=data.get("section"),
             language=data.get("language"),
+            long_video=data.get("long_video", False),
         )

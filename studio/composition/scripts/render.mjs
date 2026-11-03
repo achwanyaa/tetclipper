@@ -98,6 +98,9 @@ async function main() {
       serveUrl,
       composition,
       inputProps,
+      // A long video's effect frames are overlaid on an ffmpeg encode of the source:
+      // they must match its colours, and be sharp enough to sit next to it.
+      ...(spec.format === 'landscape' ? { colorSpace: 'bt709', jpegQuality: 92 } : {}),
       ...(audioOnly ? { codec: 'wav' } : { codec: 'h264', crf: 20, audioCodec: 'aac', muted: rest.includes('--muted') }),
       ...(frames ? { frameRange: [frames[0], frames[1]] } : {}),
       outputLocation: outPath,

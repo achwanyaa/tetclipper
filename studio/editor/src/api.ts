@@ -151,10 +151,10 @@ export function mediaUrl(jobDir: string, src: string): string {
 }
 
 /** The spec with every relative asset path resolved for the Player. */
-export function resolveForPlayer(spec: ClipSpecInput, jobDir: string): ClipSpecInput {
+export function resolveForPlayer(spec: ClipSpecInput, jobDir: string, preview?: string | null): ClipSpecInput {
   return {
     ...spec,
-    source: { ...spec.source, src: mediaUrl(jobDir, spec.source.src) },
+    source: { ...spec.source, src: mediaUrl(jobDir, preview ?? spec.source.src) },
     intro: spec.intro ? { ...spec.intro, src: mediaUrl(jobDir, spec.intro.src) } : spec.intro,
     outro: spec.outro ? { ...spec.outro, src: mediaUrl(jobDir, spec.outro.src) } : spec.outro,
     music: spec.music ? { ...spec.music, src: mediaUrl(jobDir, spec.music.src) } : spec.music,
@@ -181,6 +181,8 @@ export interface ClipData {
   clip: number
   title: string
   spec: ClipSpecInput
+  preview: string | null // the light copy the player uses instead of the original
+  previewing: boolean
   history: HistoryEntry[]
   chat: { messages: ChatMessage[]; busy: boolean; available: boolean; notice?: string | null }
   render: { output: string; spec_version: number | null; rendered_at: string } | null
@@ -231,6 +233,7 @@ export type ServerEvent =
   | { event: 'progress'; stage: string; fraction: number; message: string }
   | { event: 'result'; ok: boolean; job_id?: string; clip?: number; error?: string; output?: unknown }
   | { event: 'exited'; code: number }
+  | { event: 'preview'; job_id: string; src: string | null }
   | { event: 'spec'; job_id: string; clip: number; spec: ClipSpecInput; source: string; history: HistoryEntry[] }
   | { event: 'studio-chat'; job_id: string; clip: number; kind: 'text' | 'delta' | 'tool' | 'done'; text?: string; error?: string | null; cost?: number | null }
 

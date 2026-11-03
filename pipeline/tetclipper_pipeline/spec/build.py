@@ -256,6 +256,55 @@ def build(job_dir: Path, clip_idx: int, *, style: str | None = None, camera: boo
     return spec
 
 
+def build_long(job_dir: Path, emit=lambda f, m: None) -> dict:
+    """The one spec of a full horizontal video: the whole file, plain, with the
+    transcript for editing and captions off (burning them in renders every frame
+    the expensive way). An existing spec holds the user's edits and is kept."""
+    from . import glossary
+
+    job_dir = Path(job_dir)
+    existing = store.load(job_dir, 0)
+    if existing is not None:
+        return existing
+    emit(-1, "Preparing the transcript…")
+    ingest = _stage(job_dir, "ingest")
+    probe = ingest["probe"]
+    words = [
+        {"text": w["word"].strip(), "start": round(w["start"], 3), "end": round(w["end"], 3)}
+        for seg in _stage(job_dir, "asr")["segments"] for w in seg.get("words", [])
+        if w.get("start") is not None and w.get("word", "").strip()
+    ]
+    words, fixed = glossary.apply_fixes(words)
+    media = Path(ingest["media_path"])
+    spec = {
+        "version": 1,
+        "title": ingest.get("title") or None,
+        "format": "landscape",
+        "source": {
+            "src": media.name if media.parent == job_dir else str(media),
+            "start": 0,
+            "end": round(float(probe["duration_sec"]), 3),
+            "width": int(probe["width"]),
+            "height": int(probe["height"]),
+        },
+        "intro": None,
+        "cuts": [],
+        "words": words,
+        "captions": {"enabled": False, "style": "sermon"},
+        "crop": {"keyframes": []},
+        "effects": [],
+        "progressBar": {"enabled": False, "color": "#FFD700"},
+        "doubts": [],
+    }
+    if spec["title"] is None:
+        del spec["title"]
+    problems = validate(spec)
+    if problems:
+        raise ValueError("built an invalid spec: " + "; ".join(problems[:5]))
+    store.save(job_dir, 0, spec, reason=f"built from analysis ({fixed} learned fixes applied)" if fixed else "built from analysis")
+    return spec
+
+
 def refresh_doubts(job_dir: Path, clip_idx: int, emit=lambda f, m: None) -> dict:
     """Recompute doubts (and the Swahili second listen) on a clip's current
     words, keeping every edit. Alignment scores come from the analysis, matched
@@ -265,6 +314,8 @@ def refresh_doubts(job_dir: Path, clip_idx: int, emit=lambda f, m: None) -> dict
     if spec is None:
         raise ValueError(f"clip {clip_idx} has no spec yet")
     diarize = _stage(job_dir, "diarize")
+    if diarize is None:  # a long video's analysis skips it
+        return spec
     by_start = {round(w["start"], 2): w.get("score") for seg in diarize["segments"] for w in seg.get("words", [])
                 if w.get("start") is not None}
     raw_text = {round(w["start"], 2): w["word"] for seg in diarize["segments"] for w in seg.get("words", [])

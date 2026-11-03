@@ -2,12 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Player, type PlayerRef } from '@remotion/player'
 import {
   FPS,
-  HEIGHT,
   VerticalClip,
-  WIDTH,
   buildTimeline,
   clipSpecSchema,
   frameAtSource,
+  frameSize,
   sourceTimeAt,
   type ClipSpecInput,
   type Timeline as TL
@@ -74,7 +73,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
     }
   }, [spec])
   const timeline = useMemo(() => (parsed ? buildTimeline(parsed, FPS) : null), [parsed])
-  const inputProps = useMemo(() => resolveForPlayer(spec, data.jobDir), [spec, data.jobDir])
+  const inputProps = useMemo(() => resolveForPlayer(spec, data.jobDir, data.preview), [spec, data.jobDir, data.preview])
 
   // Track the playhead (~8×/s is plenty for highlighting) and play state.
   useEffect(() => {
@@ -147,16 +146,18 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
         <div className="stage">
           {parsed && timeline ? (
             <>
-              <div className="player">
+              <div className={`player ${parsed.format}`}>
                 <Player
                   ref={player}
                   component={VerticalClip}
                   inputProps={inputProps}
                   durationInFrames={timeline.totalFrames}
                   fps={FPS}
-                  compositionWidth={WIDTH}
-                  compositionHeight={HEIGHT}
+                  compositionWidth={frameSize(parsed.format).width}
+                  compositionHeight={frameSize(parsed.format).height}
                   clickToPlay
+                  showPosterWhenBuffering
+                  renderPoster={() => <div className="player-buffering">Loading…</div>}
                   acknowledgeRemotionLicense
                   style={{ width: '100%', height: '100%' }}
                 />
@@ -169,7 +170,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
                   {clock(frame)} <span>/ {clock(timeline.totalFrames)}</span>
                 </span>
               </div>
-              <span className="live">Live preview · edits show instantly</span>
+              <span className="live">{data.previewing ? 'Preparing a faster preview…' : 'Live preview · edits show instantly'}</span>
             </>
           ) : (
             <div className="invalid">This clip can't be previewed: the last change made it invalid. Undo it to get the preview back.</div>

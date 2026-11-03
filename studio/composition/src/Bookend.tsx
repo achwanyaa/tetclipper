@@ -14,7 +14,7 @@ function Media({ item, gain }: { item: BookendSpec; gain: (frame: number) => num
     return (
       <>
         {item.fit === 'contain' && <OffthreadVideo src={item.src} muted style={BLURRED} />}
-        <OffthreadVideo src={item.src} muted={item.volume <= 0} volume={gain} style={main} />
+        <OffthreadVideo src={item.src} muted={item.volume <= 0} volume={gain} pauseWhenBuffering style={main} />
       </>
     )
   }

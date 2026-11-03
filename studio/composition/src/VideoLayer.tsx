@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { AbsoluteFill, Easing, Img, OffthreadVideo, Sequence, interpolate, useCurrentFrame, useVideoConfig } from 'remotion'
+import { AbsoluteFill, Easing, Img, OffthreadVideo, Sequence, getRemotionEnvironment, interpolate, useCurrentFrame, useVideoConfig } from 'remotion'
+import { PreviewVideo } from './PreviewVideo'
 import { BEHIND_EFFECTS, type ClipSpec, type Effect } from './spec'
 import { type CutTransition, type Timeline, frameAtSource, sourceTimeAt } from './timeline'
 import { transitionLook } from './transitions'
@@ -156,6 +157,7 @@ function Track({ src, offset, tl, style, transparent, windows }: {
         <Sequence key={`${src}-${piece.from}`} from={piece.from} durationInFrames={piece.frames} layout="none">
           <OffthreadVideo
             src={src}
+            pauseWhenBuffering
             transparent={transparent}
             muted={transparent}
             trimBefore={Math.max(0, Math.round((piece.start - offset) * fps))}
@@ -273,7 +275,17 @@ export function VideoLayer({ spec, tl }: { spec: ClipSpec; tl: Timeline }) {
           <Img src={bg.src} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
         ) : (
           <div style={bg ? { position: 'absolute', inset: 0, filter: 'blur(36px) brightness(.7)', transform: 'scale(1.1)' } : { position: 'absolute', inset: 0 }}>
-            <Track src={spec.source.src} offset={0} tl={tl} style={bgStyle} />
+            {getRemotionEnvironment().isRendering ? (
+              <Track src={spec.source.src} offset={0} tl={tl} style={bgStyle} />
+            ) : (
+              <PreviewVideo
+                src={spec.source.src}
+                time={t}
+                segment={tl.segments.findIndex((s) => frame < s.fromFrame + s.frames)}
+                active={frame >= tl.introFrames && frame < tl.videoEnd}
+                style={bgStyle}
+              />
+            )}
           </div>
         )}
       </Framing>
@@ -294,7 +306,7 @@ function CutTransitionLayer({ spec, move }: { spec: ClipSpec; move: CutTransitio
   const look = transitionLook(move.type, (frame + 0.5) / move.frames)
   const shot = (at: number) => (
     // Muted: the speech stays on the cut, in the layer underneath.
-    <OffthreadVideo src={spec.source.src} muted trimBefore={Math.round(at * fps)} style={placement(spec, at + frame / fps, 1, 0, 0, W, H)} />
+    <OffthreadVideo src={spec.source.src} muted pauseWhenBuffering trimBefore={Math.round(at * fps)} style={placement(spec, at + frame / fps, 1, 0, 0, W, H)} />
   )
   return (
     <AbsoluteFill style={{ backgroundColor: '#000', overflow: 'hidden' }}>

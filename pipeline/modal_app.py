@@ -297,7 +297,7 @@ def render_chunk(job_dir: str, clip: int, first: int, last: int) -> bytes:
     return remote.render_chunk(job_dir, clip, first, last)
 
 
-@app.function(image=render_image, volumes={HOME: volume}, timeout=30 * 60, scaledown_window=WORK_SCALEDOWN, cpu=4.0, memory=8192)
+@app.function(image=render_image, volumes={HOME: volume}, timeout=90 * 60, scaledown_window=WORK_SCALEDOWN, cpu=4.0, memory=8192)
 def render(job_dir: str, clip: int):
     """Remotion-render one clip spec in parallel chunks (generator of progress events)."""
     _in_root()

@@ -36,6 +36,11 @@ export function StylePanel({ spec, update }: PanelProps) {
           <input type="checkbox" checked={captions.enabled ?? true} onChange={(e) => set({ enabled: e.target.checked }, 'captions on/off')} />
           Show captions
         </label>
+        {spec.format === 'landscape' && (
+          <p className="small hint">
+            Burned-in captions render every frame the slow way, about $5 for an hour of video. Leave them off to keep the render cheap.
+          </p>
+        )}
         <label className="slider">
           Position <span>{position > 0.75 ? 'lower third' : position < 0.4 ? 'top' : 'middle'} · {Math.round(position * 100)}%</span>
           <input type="range" min={0.15} max={0.92} step={0.01} value={position} onChange={(e) => set({ position: +e.target.value }, 'caption position')} />

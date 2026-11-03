@@ -3,6 +3,8 @@ studio/composition/src/music.ts, so the cloud mix matches the preview."""
 
 from __future__ import annotations
 
+from bisect import bisect_right
+
 from .timeline import FPS, intro_on_screen, outro_start, segments, source_time_at, total_frames
 
 MERGE_GAP = 0.35
@@ -44,6 +46,7 @@ def frame_gains(spec: dict, fps: int = FPS) -> list[float]:
         return [0.0] * n
     intro, segs = segments(spec, fps)
     spans = speech_spans(spec.get("words", []))
+    starts = [a for a, _ in spans]
     step = (1 - m["duck"]) / max(1.0, RAMP * fps)
     start, end = music_range(m)
     last = min(n, int((end - start) * fps + 0.5)) if not m["loop"] and end is not None else n
@@ -54,10 +57,16 @@ def frame_gains(spec: dict, fps: int = FPS) -> list[float]:
     duck = 1.0
     for f in range(n):
         t = source_time_at(intro, segs, f, fps, has_outro)
-        speaking = (t is not None and any(a <= t <= b for a, b in spans)) or f < intro_until or f >= outro_from
+        speaking = (t is not None and _speaking(spans, starts, t)) or f < intro_until or f >= outro_from
         target = m["duck"] if speaking else 1.0
         duck += max(-step, min(step, target - duck))
         fade_in = f / (m["fadeIn"] * fps) if m["fadeIn"] > 0 else 1.0
         fade_out = (last - 1 - f) / (m["fadeOut"] * fps) if m["fadeOut"] > 0 else (1.0 if f < last else 0.0)
         gains.append(m["volume"] * duck * max(0.0, min(1.0, fade_in, fade_out)))
     return gains
+
+
+def _speaking(spans: list[tuple[float, float]], starts: list[float], t: float) -> bool:
+    # The spans are disjoint and sorted (merging leaves gaps wider than the padding).
+    i = bisect_right(starts, t) - 1
+    return i >= 0 and t <= spans[i][1]

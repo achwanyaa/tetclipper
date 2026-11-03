@@ -28,6 +28,19 @@ export function musicRange(m: NonNullable<ClipSpec['music']>): [number, number |
   return [m.offset, m.end !== null && m.end > m.offset ? m.end : null]
 }
 
+/** The spans are disjoint and sorted: merging leaves gaps wider than the padding. */
+function inSpans(spans: [number, number][], t: number): boolean {
+  let lo = 0
+  let hi = spans.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (t < spans[mid][0]) hi = mid - 1
+    else if (t > spans[mid][1]) lo = mid + 1
+    else return true
+  }
+  return false
+}
+
 const hasSound = (b: ClipSpec['intro']) => b !== null && b.kind === 'video' && b.volume > 0
 
 export function musicGains(spec: ClipSpec, tl: Timeline, fps: number): number[] {
@@ -45,7 +58,7 @@ export function musicGains(spec: ClipSpec, tl: Timeline, fps: number): number[] 
   for (let f = 0; f < n; f++) {
     const t = sourceTimeAt(tl, f, fps)
     const speaking =
-      (t !== null && spans.some(([a, b]) => t >= a && t <= b)) || (introSounds && f < tl.introOnScreen) || (outroSounds && f >= tl.outroStart)
+      (t !== null && inSpans(spans, t)) || (introSounds && f < tl.introOnScreen) || (outroSounds && f >= tl.outroStart)
     const target = speaking ? m.duck : 1
     duck += Math.max(-step, Math.min(step, target - duck))
     const fadeIn = m.fadeIn > 0 ? f / (m.fadeIn * fps) : 1

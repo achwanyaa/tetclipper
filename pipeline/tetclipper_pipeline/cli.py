@@ -187,11 +187,14 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if job is None:
         print(f"No job {args.job_id}", file=sys.stderr)
         return 2
-    if not config.Settings.from_json(json.loads(job.settings_json)).section:
-        print("Only range jobs resume; run `tetclipper find` again for a find job.", file=sys.stderr)
-        return 2
+    settings = config.Settings.from_json(json.loads(job.settings_json))
     from .cloud import client as cloud_client
 
+    if settings.long_video:
+        return _run_long(job, args.jsonl, cloud=cloud_client.available())
+    if not settings.section:
+        print("Only range jobs resume; run `tetclipper find` again for a find job.", file=sys.stderr)
+        return 2
     return _run_range(job, args.jsonl, args.captions, None, cloud=cloud_client.available())
 
 
@@ -307,6 +310,64 @@ def cmd_cut(args: argparse.Namespace) -> int:
 
     cloud = args.cloud if args.cloud is not None else cloud_client.available()
     return _run_range(job, args.jsonl, args.captions, args.camera, cloud=cloud)
+
+
+def cmd_long(args: argparse.Namespace) -> int:
+    """A full horizontal video: fetch it, transcribe it and make it one Studio
+    project. No diarization, events or camera, which it doesn't use."""
+    source = args.source
+    source_type = "url" if source.startswith(("http://", "https://")) else "file"
+    settings = config.Settings()
+    settings.long_video = True
+    if args.start is not None and args.end is not None:
+        if args.end <= args.start:
+            _emit_result(args.jsonl, {"ok": False, "error": "The end time must be after the start."})
+            return 2
+        settings.section = [args.start, args.end]
+    if args.language and args.language != "auto":
+        settings.language = args.language
+    job = queue.create_job(source_type, source, json.dumps(settings.to_json()))
+    from .cloud import client as cloud_client
+
+    cloud = args.cloud if args.cloud is not None else cloud_client.available()
+    return _run_long(job, args.jsonl, cloud=cloud)
+
+
+def _run_long(job: queue.Job, jsonl: bool, cloud: bool = False) -> int:
+    emit = _progress_printer(jsonl)
+    if jsonl:
+        print(json.dumps({"event": "job", "job_id": job.id, "dir": str(job.dir)}), flush=True)
+    ok, err = _ensure_pipeline_deps(jsonl, emit)
+    if not ok:
+        queue.set_job_status(job.id, "failed", str(err))
+        _emit_result(jsonl, {"ok": False, "job_id": job.id, "error": str(err)})
+        return 1
+    wanted = ["ingest", "asr"]
+    analysis = [s for s in _stages() if s.name in wanted]
+    try:
+        from .spec import build as spec_build
+        from .spec import store as spec_store
+
+        if cloud and not spec_store.list_clips(job.dir):
+            from .cloud import client as cloud_client
+
+            queue.run_stages(job, analysis[:1], emit)  # the download stays here
+            queue.set_job_status(job.id, "running")
+            job = queue.get_job(job.id) or job
+            cloud_client.analyze(job, None, None, None, emit, stages=wanted)
+            job = queue.get_job(job.id) or job
+        queue.run_stages(job, analysis, emit)
+        queue.set_job_status(job.id, "running")
+        spec_build.build_long(job.dir, emit=lambda f, m: emit("spec", f, m))
+        entry = {"clip_index": 0, "spec": str(spec_store.spec_path(job.dir, 0))}
+    except Exception as err:  # noqa: BLE001 — every failure must reach the app
+        failed = queue.get_job(job.id)
+        error = failed.error if failed and failed.error else str(err)
+        _emit_result(jsonl, {"ok": False, "job_id": job.id, "error": error})
+        return 1
+    queue.set_job_status(job.id, "done", None)
+    _emit_result(jsonl, {"ok": True, "job_id": job.id, "output": entry, "manual": True})
+    return 0
 
 
 def _run_range(job: queue.Job, jsonl: bool, captions: str | None = None, camera: str | None = None,
@@ -531,6 +592,15 @@ def main(argv: list[str] | None = None) -> int:
                        help="analyse on the Modal GPU (default when Modal is set up)")
     p_cut.add_argument("--local", dest="cloud", action="store_false", help="analyse on this machine")
     p_cut.set_defaults(fn=cmd_cut)
+
+    p_long = sub.add_parser("long", help="make a full horizontal video a Studio project (speech analysis only)")
+    p_long.add_argument("source", help="Google Drive or YouTube link, or a local video file")
+    p_long.add_argument("--start", type=_parse_clock, default=None, help="only from here, e.g. 12:30 (needs --end)")
+    p_long.add_argument("--end", type=_parse_clock, default=None, help="only to here, e.g. 1:13:15 (needs --start)")
+    p_long.add_argument("--language", default="auto", help="speech language: en, sw, … or auto")
+    p_long.add_argument("--cloud", dest="cloud", action="store_true", default=None, help="analyse on the Modal GPU")
+    p_long.add_argument("--local", dest="cloud", action="store_false", help="analyse on this machine")
+    p_long.set_defaults(fn=cmd_long)
 
     p_serve = sub.add_parser("serve", help="run Studio (http://localhost:8765/studio/) + the API")
     p_serve.add_argument("--host", default="127.0.0.1")

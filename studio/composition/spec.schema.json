@@ -12,6 +12,14 @@
         "title": {
           "type": "string"
         },
+        "format": {
+          "type": "string",
+          "enum": [
+            "vertical",
+            "landscape"
+          ],
+          "default": "vertical"
+        },
         "source": {
           "type": "object",
           "properties": {

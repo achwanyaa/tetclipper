@@ -117,7 +117,9 @@ class IngestStage(Stage):
                 "This video has no audio track. tetclipper needs speech to find moments."
             )
 
-        if info.vfr:
+        # A long video's render reads frames by time, and re-encoding an hour on
+        # the small web server would take longer than everything else together.
+        if info.vfr and not ctx.settings.long_video:
             cfr_path = ctx.job_dir / "media_cfr.mp4"
             try:
                 if not cfr_path.exists():
