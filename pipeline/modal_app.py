@@ -163,6 +163,8 @@ def _commit_forever(every: float = 30.0) -> None:
     secrets=[
         modal.Secret.from_name("tetclipper-web"),
         modal.Secret.from_name("tetclipper-supabase"),
+        # SUPABASE_SECRET_KEY: lets the admin invite people and set roles (server/users.py).
+        modal.Secret.from_name("tetclipper-supabase-admin"),
         # No GPU here: jobs send their GPU work to the functions below.
         modal.Secret.from_dict({"TETCLIPPER_GPU_FUNCTIONS": "1"}),
     ],
