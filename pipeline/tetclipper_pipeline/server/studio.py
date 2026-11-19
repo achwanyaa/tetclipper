@@ -415,18 +415,23 @@ def _asset_kind(path: Path) -> str:
 
 
 def _probe_media(path: Path) -> dict:
-    """Length in seconds and whether a media file has sound (empty if unreadable:
-    the browser can still read the length when it loads the file)."""
+    """Length in seconds, whether a media file has sound, and the picture's size
+    (empty if unreadable: the browser can still read them when it loads the file)."""
     from ..render.ffmpeg_bin import ffprobe
 
     try:
         run = subprocess.run(
-            [ffprobe(), "-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", str(path)],
+            [ffprobe(), "-v", "error", "-show_entries", "format=duration:stream=codec_type,width,height", "-of", "json", str(path)],
             capture_output=True, text=True, timeout=60,
         )
         data = json.loads(run.stdout or "{}")
-        return {"duration": float(data.get("format", {}).get("duration") or 0),
-                "hasAudio": any(s.get("codec_type") == "audio" for s in data.get("streams", []))}
+        streams = data.get("streams", [])
+        out: dict[str, Any] = {"duration": float(data.get("format", {}).get("duration") or 0),
+                               "hasAudio": any(s.get("codec_type") == "audio" for s in streams)}
+        picture = next((s for s in streams if s.get("codec_type") == "video" and s.get("width")), None)
+        if picture:
+            out.update(width=int(picture["width"]), height=int(picture["height"]))
+        return out
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return {}
 
@@ -438,7 +443,8 @@ def studio_attach(jobId: str, clip: int, path: str) -> dict:
     and whether it has sound."""
     job_dir = _job_dir(jobId)
     src = Path(path).resolve()
-    roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve()]  # own uploads or a library track
+    # own uploads, a library track or a team overlay
+    roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve(), overlays_dir().resolve()]
     if not any(root in src.parents for root in roots) or not src.is_file():
         raise CommandError("upload not found")
     if src.suffix.lower() not in IMAGE_EXTS | AUDIO_EXTS | VIDEO_EXTS:
@@ -453,9 +459,73 @@ def studio_attach(jobId: str, clip: int, path: str) -> dict:
         n += 1
     shutil.copyfile(src, dest)
     out: dict[str, Any] = {"src": dest.relative_to(job_dir).as_posix(), "kind": _asset_kind(dest)}
-    if out["kind"] != "image":
-        out.update(_probe_media(dest))
+    probe = _probe_media(dest)
+    if out["kind"] == "image":  # a still has no length; a GIF's is its loop
+        probe = {k: v for k, v in probe.items() if k in ("width", "height") or (k == "duration" and dest.suffix.lower() == ".gif")}
+    out.update(probe)
     return out
+
+
+# ---------- team overlays: one shared library of logos, GIFs and stickers ----------
+
+OVERLAY_EXTS = IMAGE_EXTS | {".mp4", ".mov", ".m4v", ".webm"}
+OVERLAY_MAX_BYTES = 50 * 1024 * 1024
+
+
+def overlays_dir() -> Path:
+    """Shared by everyone, like the music library (home_dir()/audio)."""
+    return home_dir() / "overlays"
+
+
+def _overlay_kind(path: Path) -> str:
+    suffix = path.suffix.lower()
+    return "gif" if suffix == ".gif" else "image" if suffix in IMAGE_EXTS else "video"
+
+
+def _overlay_item(path: Path) -> dict:
+    return {"name": path.name, "kind": _overlay_kind(path), "path": str(path), "size": path.stat().st_size}
+
+
+@command
+def overlay_library() -> list[dict]:
+    """The team's overlays, newest first."""
+    root = overlays_dir()
+    files = [p for p in root.iterdir() if p.is_file() and p.suffix.lower() in OVERLAY_EXTS] if root.is_dir() else []
+    return [_overlay_item(p) for p in sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)]
+
+
+@command
+def overlay_library_add(path: str) -> dict:
+    """Copy one of your uploads into the team's overlays."""
+    src = Path(path).resolve()
+    if workspace_dir().resolve() not in src.parents or not src.is_file():
+        raise CommandError("upload not found")
+    if src.suffix.lower() not in OVERLAY_EXTS:
+        raise CommandError("Use a photo (JPG, PNG, WebP), a GIF or a video (MP4, MOV, WebM).")
+    if src.stat().st_size > OVERLAY_MAX_BYTES:
+        raise CommandError(f"That file is too big for an overlay (the limit is {OVERLAY_MAX_BYTES // (1024 * 1024)} MB).")
+    root = overlays_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    stem = _SAFE_NAME.sub("_", src.stem) or "overlay"
+    dest = root / f"{stem}{src.suffix.lower()}"
+    n = 1
+    while dest.exists():
+        dest = root / f"{stem}-{n}{src.suffix.lower()}"
+        n += 1
+    shutil.copyfile(src, dest)
+    return _overlay_item(dest)
+
+
+@command
+def overlay_library_remove(name: str) -> list[dict]:
+    """Take a file out of the team's overlays (admin). Clips that use it keep their own copy."""
+    if not is_admin():
+        raise CommandError("Only the admin can remove team overlays.")
+    target = (overlays_dir() / Path(name).name).resolve()
+    if target.parent != overlays_dir().resolve() or not target.is_file():
+        raise CommandError("no such overlay")
+    target.unlink()
+    return overlay_library()
 
 
 @command

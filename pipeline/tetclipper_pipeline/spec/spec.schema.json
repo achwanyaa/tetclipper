@@ -1421,6 +1421,99 @@
           },
           "default": []
         },
+        "overlays": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "src": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "image",
+                  "gif",
+                  "video"
+                ],
+                "default": "image"
+              },
+              "from": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "to": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.8
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.15
+              },
+              "width": {
+                "type": "number",
+                "minimum": 0.03,
+                "maximum": 1,
+                "default": 0.25
+              },
+              "aspect": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "default": 1
+              },
+              "rotation": {
+                "type": "number",
+                "minimum": -180,
+                "maximum": 180,
+                "default": 0
+              },
+              "opacity": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 1
+              },
+              "duration": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "id",
+              "src"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
         "progressBar": {
           "type": "object",
           "properties": {

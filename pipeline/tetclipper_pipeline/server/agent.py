@@ -311,7 +311,7 @@ TOOLS = [
     {
         "name": "update_spec",
         "description": "Change top-level spec fields. Object fields (captions, source, intro, outro, music, progressBar) are "
-        "merged with what's there; lists (cuts, effects, doubts) and other values are replaced; null clears "
+        "merged with what's there; lists (cuts, effects, overlays, doubts) and other values are replaced; null clears "
         "intro, outro or music. The change is validated before it's saved.",
         "schema": {"type": "object", "properties": {"changes": {"type": "object"}}, "required": ["changes"]},
     },
@@ -341,19 +341,19 @@ TOOLS = [
     },
     {
         "name": "add_items",
-        "description": "Append to the `cuts` or `effects` list.",
+        "description": "Append to the `cuts`, `effects` or `overlays` list.",
         "schema": {
             "type": "object",
-            "properties": {"field": {"type": "string", "enum": ["cuts", "effects"]}, "items": {"type": "array", "items": {"type": "object"}}},
+            "properties": {"field": {"type": "string", "enum": ["cuts", "effects", "overlays"]}, "items": {"type": "array", "items": {"type": "object"}}},
             "required": ["field", "items"],
         },
     },
     {
         "name": "remove_items",
-        "description": "Remove entries from the `cuts` or `effects` list by index (see get_spec).",
+        "description": "Remove entries from the `cuts`, `effects` or `overlays` list by index (see get_spec).",
         "schema": {
             "type": "object",
-            "properties": {"field": {"type": "string", "enum": ["cuts", "effects"]}, "indexes": {"type": "array", "items": {"type": "integer"}}},
+            "properties": {"field": {"type": "string", "enum": ["cuts", "effects", "overlays"]}, "indexes": {"type": "array", "items": {"type": "integer"}}},
             "required": ["field", "indexes"],
         },
     },
@@ -548,13 +548,18 @@ The spec (all times are SOURCE seconds, positions in the media file):
   Behind the speaker (needs `matte`; if it's null tell the user to press "Cut out speaker" in Effects):
   wall-text, frame-break, background {{mode blur|color|image}}, cover.
   Keep graphics short (2–6 s) and use the speaker's own words for text.
+- overlays [{{id, src, kind image|gif|video, from, to, x, y, width, aspect, rotation?, opacity?, duration?}}]:
+  photos, GIFs and videos on top of the clip (a logo in a corner). src is a file the user added in the
+  Overlays tab (you can't create files). from/to are source seconds, null = the clip's start/end. x/y are
+  the centre as fractions of the frame, width a fraction of the frame width; keep aspect (the file's
+  width/height). Corners sit about 0.04 in from the edge. Keep ids unique. Overlays are silent.
 - progressBar {{enabled, color}}.
 
 Rules:
 - Look before you edit: read_transcript or find_words to locate what the user means.
 - Keep edits minimal. Don't invent words that weren't said; caption fixes are for clear mishearings.
 - If a save is rejected, read the problems and fix the change.
-- Keep long videos cheap: effects render fast because they're short. Turning on captions or the progress bar on a long video makes every frame render the slow way, about $5 an hour of video: say so first.
+- Keep long videos cheap: effects render fast because they're short. Turning on captions or the progress bar on a long video makes every frame render the slow way, about $5 an hour of video: say so first. An overlay costs the same for as long as it is on screen.
 - If asked for something the spec can't do (voice changes, new footage), say so briefly.
 - The user renders with the Render button; you don't render.
 - Reply in short plain text, no headings: say what you changed, with times as m:ss.

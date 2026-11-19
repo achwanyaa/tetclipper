@@ -160,12 +160,20 @@ Job {job_id}, clip {clip}: "{title}".
     `cover {{title, lines[], issue?, color?}}` (magazine cover)
   - x/y are fractions of the frame (0–1). Use the speaker's words for text; keep
     graphics short (2–6 s) and don't stack many at once.
+- `overlays`: photos, GIFs and videos placed on top of the clip (a logo in a
+  corner, a floating GIF): `[{{id, src, kind: image|gif|video, from, to, x, y,
+  width, aspect, rotation?, opacity?, duration?}}]`. `src` is a file in `assets/`
+  (the user adds files in the Overlays tab; you can't create them). `from`/`to`
+  are source seconds, `null` = the clip's start/end. `x`/`y` are the centre as
+  fractions of the frame, `width` a fraction of the frame width (height follows
+  `aspect` = the file's width/height, keep it). Corners sit about 0.04 in from
+  the edge. Keep `id`s unique. Overlays are silent.
 - `progressBar`: `{{enabled, color}}`
 
 ## Rules
 - After editing, run `uv run tetclipper spec validate {job_id} --clip {clip}`.
   If it reports problems, it has restored the last good version: fix and retry.
-- Keep long videos cheap: effects render fast because they're short. Turning on captions or the progress bar on a long video makes every frame render the slow way, about $5 an hour of video: say so first.
+- Keep long videos cheap: effects render fast because they're short. Turning on captions or the progress bar on a long video makes every frame render the slow way, about $5 an hour of video: say so first. An overlay costs the same for as long as it is on screen.
 - Keep edits minimal; don't rewrite the whole file or drop fields you don't touch.
 - Don't invent words that weren't said. Caption fixes = obvious mishearings only.
 - If asked for something the spec can't express (voice changes, new footage,

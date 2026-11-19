@@ -159,7 +159,8 @@ export function resolveForPlayer(spec: ClipSpecInput, jobDir: string, preview?: 
     outro: spec.outro ? { ...spec.outro, src: mediaUrl(jobDir, spec.outro.src) } : spec.outro,
     music: spec.music ? { ...spec.music, src: mediaUrl(jobDir, spec.music.src) } : spec.music,
     matte: spec.matte ? { ...spec.matte, src: mediaUrl(jobDir, spec.matte.src) } : spec.matte,
-    effects: spec.effects?.map((e) => ((e.type === 'image' || e.type === 'background') && e.src ? { ...e, src: mediaUrl(jobDir, e.src) } : e))
+    effects: spec.effects?.map((e) => ((e.type === 'image' || e.type === 'background') && e.src ? { ...e, src: mediaUrl(jobDir, e.src) } : e)),
+    overlays: spec.overlays?.map((o) => ({ ...o, src: mediaUrl(jobDir, o.src) }))
   }
 }
 

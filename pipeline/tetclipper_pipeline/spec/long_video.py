@@ -7,7 +7,8 @@ extra (intro, outro, transitions, effects) go through Remotion. Overlaying those
 on the encode gives the same picture for a fraction of the price.
 
 Turning on captions, the progress bar or camera moves makes every frame count as
-extra, and the render falls back to Remotion for the whole video."""
+extra, and the render falls back to Remotion for the whole video. A photo, GIF or
+video overlay counts for as long as it is on screen."""
 
 from __future__ import annotations
 
@@ -102,6 +103,49 @@ def _effect_ranges(spec: dict, fps: int) -> list[tuple[int, int]]:
     return out
 
 
+def _span_frames(spec: dict, start: float | None, end: float | None, fps: int = FPS) -> tuple[int, int] | None:
+    """Output frames [first, end) showing source start..end (None = the clip's
+    start or end), as outputSpan() in studio/composition/src/timeline.ts."""
+    frame, segs = segments(spec, fps)
+    first: int | None = None
+    stop: int | None = None
+    for seg_start, n in segs:
+        seg_end = seg_start + n / fps
+        a = seg_start if start is None else max(float(start), seg_start)
+        b = seg_end if end is None else min(float(end), seg_end)
+        if b > a:
+            f0 = frame + _round((a - seg_start) * fps)
+            f1 = frame + min(n, _round((b - seg_start) * fps))
+            if f1 > f0:
+                first = f0 if first is None else first
+                stop = f1
+        frame += n
+    return None if first is None or stop is None else (first, stop)
+
+
+def _overlay_ranges(spec: dict, fps: int) -> list[tuple[int, int]]:
+    """Frames showing a photo, GIF or video overlay: on screen from its first
+    frame to its last, straight across any cuts between."""
+    out: list[tuple[int, int]] = []
+    for o in spec.get("overlays", []):
+        span = _span_frames(spec, o.get("from"), o.get("to"), fps)
+        if span:
+            out.append((span[0], span[1] - 1))
+    return out
+
+
+def overlay_seconds(spec: dict, fps: int = FPS) -> float:
+    """Seconds of output that show at least one overlay (what they add to a long video's render)."""
+    ranges = sorted(_overlay_ranges(spec, fps))
+    frames, reach = 0, -1
+    for a, b in ranges:
+        a = max(a, reach + 1)
+        if b >= a:
+            frames += b - a + 1
+            reach = b
+    return frames / fps
+
+
 def _needs_every_frame(spec: dict) -> bool:
     captions = spec.get("captions") or {}
     if captions.get("enabled", True) and any(not w.get("hidden") and str(w.get("text", "")).strip() for w in spec.get("words", [])):
@@ -117,6 +161,7 @@ def remotion_ranges(spec: dict, fps: int = FPS) -> list[tuple[int, int]]:
     if _needs_every_frame(spec):
         return [(0, total - 1)]
     ranges = _effect_ranges(spec, fps)
+    ranges += _overlay_ranges(spec, fps)
     ranges += [(first, first + n - 1) for first, n in cut_transitions(spec, fps)]
     if spec.get("intro"):
         ranges.append((0, intro_on_screen(spec, fps) - 1))

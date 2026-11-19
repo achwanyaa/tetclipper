@@ -132,6 +132,25 @@ export function frameAtSource(tl: Timeline, t: number, fps: number): number | nu
   return null
 }
 
+/** Output frames [first, end) that show the source span from..to (null = the
+ *  clip's start or end), skipping cuts; null if all of it was cut. Python
+ *  mirror: spec/long_video.py _span_frames. */
+export function outputSpan(tl: Timeline, from: number | null, to: number | null, fps: number): [number, number] | null {
+  let first: number | null = null
+  let end: number | null = null
+  for (const s of tl.segments) {
+    const a = from === null ? s.start : Math.max(from, s.start)
+    const b = to === null ? s.end : Math.min(to, s.end)
+    if (b <= a) continue
+    const f0 = s.fromFrame + Math.round((a - s.start) * fps)
+    const f1 = s.fromFrame + Math.min(s.frames, Math.round((b - s.start) * fps))
+    if (f1 <= f0) continue
+    if (first === null) first = f0
+    end = f1
+  }
+  return first === null || end === null ? null : [first, end]
+}
+
 export function isInCut(tl: Timeline, t: number): boolean {
   return !tl.segments.some((s) => t >= s.start && t < s.end)
 }

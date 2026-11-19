@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipSpecInput } from '@tetclipper/composition'
-import { authConfig, invoke, isAwake, onEvent, onWake, setAuth, setWorking, type AiSettings as AiSettingsData, type ClipData, type JobSummary } from './api'
+import { authConfig, fileUrl, invoke, isAwake, onEvent, onWake, setAuth, setWorking, type AiSettings as AiSettingsData, type ClipData, type JobSummary } from './api'
 import { signOut, useSession } from './auth'
 import { AiSettings } from './components/AiSettings'
 import { Canvas } from './components/Canvas'
@@ -349,6 +349,15 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
         onHome={goHome}
         onOpen={(jobId, clip) => setOpen({ jobId, clip })}
         onUndo={undo}
+        render={
+          open && data
+            ? rendering
+              ? { state: 'rendering', pct: Math.round((run?.fraction ?? 0) * 100) }
+              : data.render && data.render.spec_version === latest
+                ? { state: 'fresh', download: fileUrl(data.render.output, true) }
+                : { state: 'idle', onRender: startRender }
+            : null
+        }
       />
 
       {aiOpen && (
@@ -384,6 +393,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
             onRender={startRender}
             setError={setError}
             online={!!account}
+            admin={isAdmin}
           />
         ) : (
           <div className="home">

@@ -566,10 +566,10 @@ async def stream_events(request: Request) -> StreamingResponse:
 
 @app.get("/files")
 async def get_file(path: str, download: int = 0) -> FileResponse:
-    # Only the user's own workspace, plus the shared music library. The
-    # desktop app's workspace is the whole home.
+    # Only the user's own workspace, plus the shared music library and team
+    # overlays. The desktop app's workspace is the whole home.
     file = Path(path).resolve()
-    roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve()]
+    roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve(), (home_dir() / "overlays").resolve()]
     if not any(root in file.parents for root in roots) or not file.is_file():
         raise HTTPException(404)
     return FileResponse(file, filename=file.name if download else None)

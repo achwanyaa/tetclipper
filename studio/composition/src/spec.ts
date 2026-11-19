@@ -229,6 +229,27 @@ export const cutSchema = z.object({
   transition: transitionSchema.nullable().default(null) // null = hard cut
 })
 
+// A photo, GIF or video placed on top of the clip (a logo in a corner, a
+// floating sticker). Its size and place are fractions of the frame, so it sits
+// the same in a vertical clip and a landscape video. `from`/`to` are source
+// seconds; null means the clip's start/end, so a whole-clip logo stays whole
+// when the range is widened or trimmed. Overlays are silent.
+export const OVERLAY_KINDS = ['image', 'gif', 'video'] as const
+export const overlaySchema = z.object({
+  id: z.string().min(1),
+  src: z.string(),
+  kind: z.enum(OVERLAY_KINDS).default('image'),
+  from: seconds.nullable().default(null),
+  to: seconds.nullable().default(null),
+  x: fraction.default(0.8), // centre, fraction of the frame width
+  y: fraction.default(0.15), // centre, fraction of the frame height
+  width: z.number().min(0.03).max(1).default(0.25), // fraction of the frame width
+  aspect: z.number().positive().default(1), // the file's width / height
+  rotation: z.number().min(-180).max(180).default(0),
+  opacity: fraction.default(1),
+  duration: z.number().positive().optional() // a GIF's or video's length, for looping
+})
+
 // A full-screen still or video before or after the clip. `duration` is its time
 // on screen; a transition overlaps the clip by the transition's length.
 const bookendSchema = z.object({
@@ -307,6 +328,7 @@ export const clipSpecSchema = z.object({
     })
     .default({}),
   effects: z.array(effectSchema).default([]),
+  overlays: z.array(overlaySchema).default([]),
   progressBar: z
     .object({
       enabled: z.boolean().default(false),
@@ -323,6 +345,9 @@ export type Cut = z.infer<typeof cutSchema>
 export type Transition = z.infer<typeof transitionSchema>
 export type TransitionType = (typeof TRANSITIONS)[number]
 export type Bookend = z.infer<typeof bookendSchema>
+export type Overlay = z.infer<typeof overlaySchema>
+export type OverlayInput = z.input<typeof overlaySchema>
+export type OverlayKind = (typeof OVERLAY_KINDS)[number]
 export type Doubt = z.infer<typeof clipSpecSchema>['doubts'][number]
 export type Music = NonNullable<z.infer<typeof clipSpecSchema>['music']>
 export type ClipSpec = z.infer<typeof clipSpecSchema>

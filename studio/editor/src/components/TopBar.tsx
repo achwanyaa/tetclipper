@@ -21,9 +21,12 @@ interface Props {
   onHome: () => void
   onOpen: (jobId: string, clip: number) => void
   onUndo: () => void
+  render?: TopRender | null // the small Render button, top right, while a clip is open
 }
 
-export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme, engine, onAi, account, onSignOut, onHome, onOpen, onUndo }: Props) {
+export type TopRender = { state: 'idle'; onRender: () => void } | { state: 'rendering'; pct: number } | { state: 'fresh'; download: string }
+
+export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme, engine, onAi, account, onSignOut, onHome, onOpen, onUndo, render }: Props) {
   const [picker, setPicker] = useState(false)
   const [menu, setMenu] = useState(false)
   const job = open ? jobs.find((j) => j.id === open.jobId) : undefined
@@ -70,6 +73,21 @@ export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme,
         <button onClick={onUndo} disabled={!canUndo} title="Undo the last change (yours or the AI's)">
           ↶ Undo
         </button>
+      )}
+      {render?.state === 'idle' && (
+        <button className="primary top-render" onClick={render.onRender} title="Render this clip">
+          Render
+        </button>
+      )}
+      {render?.state === 'rendering' && (
+        <button className="primary top-render" disabled title="Rendering in the cloud">
+          Rendering <span className="mono">{render.pct}%</span>
+        </button>
+      )}
+      {render?.state === 'fresh' && (
+        <a className="btn top-render" href={render.download} title="Download the rendered video">
+          Download
+        </a>
       )}
       {engine && (
         <button className="engine-btn" title="AI model for the chat (admin)" onClick={onAi}>

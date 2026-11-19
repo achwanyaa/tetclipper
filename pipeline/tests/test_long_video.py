@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from tetclipper_pipeline.cloud import remote
-from tetclipper_pipeline.spec.long_video import cut_transitions, overlay_filter, remotion_ranges
+from tetclipper_pipeline.spec.long_video import cut_transitions, overlay_filter, overlay_seconds, remotion_ranges
 from tetclipper_pipeline.spec.schema import validate
 from tetclipper_pipeline.spec.timeline import total_frames
 
@@ -73,6 +73,40 @@ def test_an_effect_in_a_cut_needs_no_frames():
 def test_these_need_every_frame(fields):
     spec = _spec(**fields)
     assert remotion_ranges(spec) == [(0, total_frames(spec) - 1)]
+
+
+LOGO = {"id": "o1", "src": "studio/clip_00/assets/logo.gif", "kind": "gif", "x": 0.85, "y": 0.12, "width": 0.2, "aspect": 1}
+
+
+def test_an_overlay_validates_and_old_specs_without_one_still_do():
+    assert validate(_spec(overlays=[LOGO])) == []
+    assert validate(_spec(overlays=[{**LOGO, "from": 10, "to": 20, "rotation": 15, "opacity": 0.5, "duration": 2.4}])) == []
+    assert validate(_spec(overlays=[{**LOGO, "kind": "sticker"}]))
+    assert validate(_spec(overlays=[{**LOGO, "width": 0}]))
+    assert validate(_spec(overlays=[{"src": "x.png"}]))  # no id
+
+
+def test_a_short_overlay_adds_only_its_own_frames():
+    spec = _spec(overlays=[{**LOGO, "from": 60, "to": 65}])
+    assert remotion_ranges(spec) == [(1800, 1949)]
+    assert overlay_seconds(spec) == 5
+
+
+def test_an_overlay_across_a_cut_stays_on_screen_through_it():
+    spec = _spec(cuts=[{"start": 62, "end": 70}], overlays=[{**LOGO, "from": 60, "to": 72}])
+    # 2 s before the cut and 2 s after it, joined: 4 s of output.
+    assert remotion_ranges(spec) == [(1800, 1919)]
+
+
+def test_an_overlay_entirely_in_a_cut_needs_no_frames():
+    assert remotion_ranges(_spec(cuts=[{"start": 50, "end": 80}], overlays=[{**LOGO, "from": 60, "to": 65}])) == []
+
+
+def test_a_whole_video_overlay_makes_every_video_frame_count():
+    spec = _spec(intro={"src": "i.jpg", "duration": 2}, overlays=[LOGO])
+    total = total_frames(spec)
+    assert remotion_ranges(spec) == [(0, total - 1)]
+    assert overlay_seconds(spec) == 3600
 
 
 def test_overlay_timing_puts_each_joined_frame_on_its_own_output_frame():

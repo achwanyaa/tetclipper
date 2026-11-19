@@ -45,14 +45,16 @@ function serve(root) {
       return res.writeHead(404).end()
     }
     const type = TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream'
+    // GIF overlays are read with fetch() from the bundle's own origin.
+    const cors = { 'Access-Control-Allow-Origin': '*' }
     const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range ?? '')
     if (range) {
       const start = range[1] ? Number(range[1]) : size - Number(range[2])
       const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1
-      res.writeHead(206, { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes' })
+      res.writeHead(206, { ...cors, 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes' })
       createReadStream(file, { start, end }).pipe(res)
     } else {
-      res.writeHead(200, { 'Content-Type': type, 'Content-Length': size, 'Accept-Ranges': 'bytes' })
+      res.writeHead(200, { ...cors, 'Content-Type': type, 'Content-Length': size, 'Accept-Ranges': 'bytes' })
       createReadStream(file).pipe(res)
     }
   })
@@ -70,6 +72,7 @@ function resolveAssets(spec, base) {
   if (out.music) out.music.src = url(out.music.src)
   if (out.matte) out.matte.src = url(out.matte.src)
   for (const e of out.effects ?? []) if ((e.type === 'image' || e.type === 'background') && e.src) e.src = url(e.src)
+  for (const o of out.overlays ?? []) o.src = url(o.src)
   return out
 }
 

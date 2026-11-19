@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { BEHIND_EFFECTS, type EffectInput as Effect } from '@tetclipper/composition'
 import { fmt, invoke, onEvent } from '../api'
 import type { PanelProps } from './Canvas'
@@ -124,11 +124,22 @@ function Fields({ effect, onChange }: { effect: Effect; onChange: (e: Effect) =>
   )
 }
 
+interface Props extends PanelProps {
+  open: number | null // the effect being edited (index into spec.effects); the timeline opens one too
+  setOpen: (index: number | null) => void
+}
+
 /** Timed effects: pick one to add at the playhead, then edit or delete it. */
-export function EffectsPanel({ data, spec, editor, update, seek, setError }: PanelProps) {
+export function EffectsPanel({ data, spec, editor, update, seek, setError, open, setOpen }: Props) {
   const effects = spec.effects ?? []
-  const [open, setOpen] = useState<number | null>(null)
   const [cutting, setCutting] = useState(false)
+  const openRow = useRef<HTMLTableRowElement>(null)
+
+  // Opened from the timeline: bring it into view.
+  useEffect(() => {
+    // 'start' so its settings, in the row below, are in view too.
+    if (open !== null) openRow.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }, [open])
   const at = +(editor.playhead ?? spec.source.start).toFixed(2)
   const sorted = effects.map((e, i) => ({ e, i })).sort((a, b) => a.e.at - b.e.at)
   const punches = effects.filter((e) => e.type === 'punch-in').length
@@ -153,6 +164,10 @@ export function EffectsPanel({ data, spec, editor, update, seek, setError }: Pan
   const remove = (i: number) => {
     update({ ...spec, effects: effects.filter((_, j) => j !== i) }, `remove ${LABEL[effects[i].type] ?? effects[i].type}`)
     setOpen(null)
+  }
+  const removeAllPunches = () => {
+    update({ ...spec, effects: effects.filter((e) => e.type !== 'punch-in') }, 'remove all punch-ins')
+    setOpen(null) // indexes shift
   }
 
   return (
@@ -194,7 +209,7 @@ export function EffectsPanel({ data, spec, editor, update, seek, setError }: Pan
         <tbody>
           {sorted.map(({ e, i }) => (
             <Fragment key={i}>
-              <tr className={open === i ? 'open' : ''}>
+              <tr className={open === i ? 'open' : ''} ref={open === i ? openRow : undefined}>
                 <td>
                   <button className="link" onClick={() => seek(e.at)}>
                     {fmt(e.at)}
@@ -205,11 +220,11 @@ export function EffectsPanel({ data, spec, editor, update, seek, setError }: Pan
                   {BEHIND.has(e.type) && !spec.matte && <span className="muted small"> · needs cutout</span>}
                 </td>
                 <td className="muted">{e.duration.toFixed(1)} s</td>
-                <td>
+                <td className="fx-actions">
                   <button className="link" onClick={() => setOpen(open === i ? null : i)}>
                     {open === i ? 'close' : 'edit'}
                   </button>
-                  <button className="link" onClick={() => remove(i)} title="delete">
+                  <button className="link" onClick={() => remove(i)} title="delete" aria-label={`Delete ${LABEL[e.type] ?? e.type} at ${fmt(e.at)}`}>
                     ✕
                   </button>
                 </td>
@@ -231,7 +246,7 @@ export function EffectsPanel({ data, spec, editor, update, seek, setError }: Pan
         </tbody>
       </table>
       {punches > 0 && (
-        <button className="link" onClick={() => update({ ...spec, effects: effects.filter((e) => e.type !== 'punch-in') }, 'remove all punch-ins')}>
+        <button className="link" onClick={removeAllPunches}>
           remove all {punches} punch-ins
         </button>
       )}

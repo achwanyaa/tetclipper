@@ -179,3 +179,41 @@ def test_users_are_never_told_which_ai_answers(client):
     body = cmd(c, "studio_clip", "token-a", jobId="job1", clip=0).text
     assert "Done." in body and "ai: bigger captions" in body
     assert "claude" not in body.lower() and "anthropic" not in body.lower()
+
+
+def _upload(c, token, name, data):
+    return c.post("/api/upload", params={"name": name}, content=data, headers={"Authorization": f"Bearer {token}"}).json()["path"]
+
+
+def test_team_overlays_are_shared_and_only_the_admin_removes_them(client, tmp_path):
+    c, job = client
+    path = _upload(c, "token-b", "logo.png", b"png-bytes")
+    item = cmd(c, "overlay_library_add", "token-b", path=path).json()
+    assert item["name"] == "logo.png" and item["kind"] == "image"
+    # The other user sees it and can read the file.
+    assert [i["name"] for i in cmd(c, "overlay_library", "token-a").json()] == ["logo.png"]
+    media_a = cmd(c, "me", "token-a").json()["media_token"]
+    assert c.get("/files", params={"path": item["path"], "access_token": media_a}).content == b"png-bytes"
+    # Putting it on a clip copies it into the clip, so removing it later is safe.
+    attached = cmd(c, "studio_attach", "token-a", jobId="job1", clip=0, path=item["path"]).json()
+    assert attached["src"] == "studio/clip_00/assets/logo.png"
+    assert remove(c, "token-b", "logo.png").status_code == 400
+    assert remove(c, "token-a", "logo.png").json() == []
+    assert (job / attached["src"]).read_bytes() == b"png-bytes"
+
+
+def test_team_overlays_take_only_your_own_pictures_and_videos(client, tmp_path):
+    c, job = client
+    # Someone else's upload, a path outside your workspace, and the wrong kind of file.
+    other = _upload(c, "token-a", "a.png", b"x")
+    assert cmd(c, "overlay_library_add", "token-b", path=other).status_code == 400
+    assert cmd(c, "overlay_library_add", "token-a", path=str(tmp_path / "secrets.json")).status_code == 400
+    song = _upload(c, "token-a", "song.mp3", b"x")
+    assert cmd(c, "overlay_library_add", "token-a", path=song).status_code == 400
+    assert remove(c, "token-a", "../users").status_code == 400
+    gif = cmd(c, "overlay_library_add", "token-a", path=_upload(c, "token-a", "praise.gif", b"GIF89a")).json()
+    assert gif["kind"] == "gif"
+
+
+def remove(c, token, file):
+    return c.post("/api/cmd/overlay_library_remove", json={"name": file}, headers={"Authorization": f"Bearer {token}"})
