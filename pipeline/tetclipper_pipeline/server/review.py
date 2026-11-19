@@ -134,7 +134,7 @@ def _who(user: dict) -> dict:
 
 
 def _is_reviewer(user: dict) -> bool:
-    return user["role"] in ("admin", "reviewer")
+    return user["role"] in ("admin", "head_reviewer", "reviewer")
 
 
 def _may_see(user: dict, item: dict) -> bool:

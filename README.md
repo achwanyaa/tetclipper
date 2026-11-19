@@ -51,9 +51,15 @@ Editors press **Send for review** after rendering. The communication team opens
 at a time in the video. A video sent back opens on its notes in the editor;
 the editor ticks them off and sends a new version. Good videos are downloaded
 from Review and posted by hand. **Record** shows who edited, reviewed and
-downloaded what. Roles come from Supabase: set a user's app metadata to
-`{"role": "reviewer"}` for the communication team or `{"role": "admin"}`; anyone
-else is an editor. The team guide is `docs/TEAM-GUIDE.md`.
+downloaded what. The admin invites people and sets their roles on the **Team**
+page (the server needs `SUPABASE_SECRET_KEY` for that): editors see editing only,
+reviewers see Review only, the head reviewer sees Review and Record, the admin sees
+everything. Roles are stored in Supabase as `app_metadata.role`. The team guide is
+`docs/TEAM-GUIDE.md`.
+
+The Overlays tab offers suggested overlays that ship with the app
+(`pipeline/tetclipper_pipeline/server/overlay_starters/`: the ZOE Family Church
+logo, animated and as a watermark); team overlays are listed most used first.
 
 ```sh
 cd studio && npm install && npm run build -w editor     # once, and after editor changes

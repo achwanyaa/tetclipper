@@ -455,38 +455,34 @@ function RenderFooter({
     </button>
   )
 
+  // Rendering is started from the Render button in the top bar; this strip
+  // only says where the render stands and offers what comes next.
   if (rendering && !run?.error) {
     const pct = Math.round((run?.fraction ?? 0) * 100)
     return (
-      <div className="insp-foot">
+      <div className="insp-foot slim">
         <div className="status">
           <span className="dot ac" />
-          Rendering v{latest} in the cloud · keep editing
+          Rendering v{latest} · {pct}% · keep editing
         </div>
-        <div className="render-bar">
+        <div className="progress" aria-hidden="true">
           <div style={{ width: `${pct}%` }} />
-          <span>
-            Rendering <span className="mono">{pct}%</span>
-          </span>
         </div>
-        <span className="small muted" style={{ textAlign: 'center' }}>
-          {run?.message || 'About a minute for a 2-minute clip'}
-        </span>
       </div>
     )
   }
 
   return (
-    <div className="insp-foot">
+    <div className="insp-foot slim">
       {rendering && run?.error ? (
         <div className="status dg">
           <span className="dot dg" />
-          Render failed: {run.error}. Your edits are safe.
+          Render failed: {run.error}. Your edits are safe; press Render to try again.
         </div>
       ) : !r ? (
         <div className="status">
           <span className="dot" />
-          Not rendered yet
+          Not rendered yet · Render is at the top right
         </div>
       ) : fresh && sentThis && review ? (
         <div className="status">
@@ -508,44 +504,30 @@ function RenderFooter({
         </div>
       )}
 
-      {offerSend ? (
-        <button
-          className="primary big"
-          disabled={submitting}
-          onClick={async () => {
-            setSubmitting(true)
-            try {
-              await onSend()
-            } finally {
-              setSubmitting(false)
-            }
-          }}
-        >
-          {submitting ? 'Sending…' : 'Send for review'}
-        </button>
-      ) : r && fresh ? (
-        <a className="btn primary big" href={download}>
-          Download
-        </a>
-      ) : (
-        <button className="primary big" onClick={onRender}>
-          {rendering && run?.error ? 'Render again' : r ? 'Render new version' : 'Render'}
-        </button>
-      )}
-
-      {r && (!fresh || !online || offerSend) && (
+      {(offerSend || (r && (!fresh || !online))) && (
         <div className="more">
-          {!fresh && (
+          {offerSend && (
+            <button
+              className="primary"
+              disabled={submitting}
+              onClick={async () => {
+                setSubmitting(true)
+                try {
+                  await onSend()
+                } finally {
+                  setSubmitting(false)
+                }
+              }}
+            >
+              {submitting ? 'Sending…' : 'Send for review'}
+            </button>
+          )}
+          {r && !fresh && (
             <a className="btn" href={download}>
               Download older
             </a>
           )}
-          {fresh && offerSend && (
-            <a className="btn" href={download}>
-              Download
-            </a>
-          )}
-          {!online && telegram}
+          {!online && r && telegram}
         </div>
       )}
     </div>

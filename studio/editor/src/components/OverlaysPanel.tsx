@@ -8,6 +8,7 @@ interface LibraryItem {
   kind: 'image' | 'gif' | 'video'
   path: string
   size: number
+  uses?: number
 }
 
 interface Props extends PanelProps {
@@ -43,6 +44,7 @@ const SPOTS = [
  *  upload, then place them here or by dragging on the video. */
 export function OverlaysPanel({ data, spec, editor, update, setError, timeline, selected, setSelected, admin }: Props) {
   const [library, setLibrary] = useState<LibraryItem[] | null>(null)
+  const [suggested, setSuggested] = useState<LibraryItem[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const file = useRef<HTMLInputElement>(null)
   const format = spec.format ?? 'vertical'
@@ -58,6 +60,9 @@ export function OverlaysPanel({ data, spec, editor, update, setError, timeline, 
     invoke<LibraryItem[]>('overlay_library')
       .then(setLibrary)
       .catch(() => setLibrary([]))
+    invoke<LibraryItem[]>('overlay_suggestions')
+      .then(setSuggested)
+      .catch(() => setSuggested([]))
   }, [])
 
   const save = (next: OverlayInput[], reason: string) => update({ ...spec, overlays: next }, reason)
@@ -165,6 +170,22 @@ export function OverlaysPanel({ data, spec, editor, update, setError, timeline, 
         }}
       />
 
+      {suggested.length > 0 && (
+        <div className="field">
+          <span className="label">Suggested</span>
+          <div className="ov-library">
+            {suggested.map((item) => (
+              <div key={item.path} className="ov-tile">
+                <button disabled={busy !== null} onClick={() => attach(item)} title={`Put ${item.name} on this clip`}>
+                  <img src={fileUrl(item.path)} alt="" loading="lazy" />
+                  <span>{busy === item.name ? 'Adding…' : item.name.replace(/\.[a-z0-9]+$/i, '')}</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {overlays.length > 0 && (
         <div className="field">
           <span className="label">On this clip</span>
@@ -262,7 +283,7 @@ export function OverlaysPanel({ data, spec, editor, update, setError, timeline, 
       )}
 
       <div className="field">
-        <span className="label">Team overlays</span>
+        <span className="label">Team overlays{library?.some((i) => i.uses) ? ' · most used first' : ''}</span>
         {library === null ? (
           <span className="muted small">Loading…</span>
         ) : library.length === 0 ? (

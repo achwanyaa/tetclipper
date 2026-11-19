@@ -443,10 +443,12 @@ def studio_attach(jobId: str, clip: int, path: str) -> dict:
     and whether it has sound."""
     job_dir = _job_dir(jobId)
     src = Path(path).resolve()
-    # own uploads, a library track or a team overlay
-    roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve(), overlays_dir().resolve()]
+    # own uploads, a library track, a team overlay or a suggested one
+    roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve(), overlays_dir().resolve(), STARTERS_DIR.resolve()]
     if not any(root in src.parents for root in roots) or not src.is_file():
         raise CommandError("upload not found")
+    if src.parent in (overlays_dir().resolve(), STARTERS_DIR.resolve()):
+        _count_use(src.name)
     if src.suffix.lower() not in IMAGE_EXTS | AUDIO_EXTS | VIDEO_EXTS:
         raise CommandError("Use an image (JPG, PNG, WebP, GIF), a video (MP4, MOV, WebM) or audio (MP3, WAV, M4A, OGG, FLAC).")
     assets = store.clip_dir(job_dir, clip) / "assets"
@@ -477,21 +479,59 @@ def overlays_dir() -> Path:
     return home_dir() / "overlays"
 
 
+# Overlays that come with the app (the church's logo, animated and as a
+# watermark): offered as suggestions, never deleted from the app.
+STARTERS_DIR = Path(__file__).with_name("overlay_starters")
+_uses_lock = threading.Lock()
+
+
+def _uses_path() -> Path:
+    return overlays_dir() / ".uses.json"
+
+
+def _uses() -> dict[str, int]:
+    data = _read_json(_uses_path()) or {}
+    return {str(k): int(v) for k, v in data.items() if isinstance(v, (int, float))} if isinstance(data, dict) else {}
+
+
+def _count_use(name: str) -> None:
+    """How often each overlay is put on a clip: the library lists the most used first."""
+    with _uses_lock:
+        uses = _uses()
+        uses[name] = uses.get(name, 0) + 1
+        path = _uses_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(uses), encoding="utf-8")
+        os.replace(tmp, path)
+
+
 def _overlay_kind(path: Path) -> str:
     suffix = path.suffix.lower()
     return "gif" if suffix == ".gif" else "image" if suffix in IMAGE_EXTS else "video"
 
 
-def _overlay_item(path: Path) -> dict:
-    return {"name": path.name, "kind": _overlay_kind(path), "path": str(path), "size": path.stat().st_size}
+def _overlay_item(path: Path, uses: dict[str, int] | None = None) -> dict:
+    return {"name": path.name, "kind": _overlay_kind(path), "path": str(path), "size": path.stat().st_size,
+            "uses": (uses or {}).get(path.name, 0)}
+
+
+def _overlay_files(root: Path) -> list[Path]:
+    return [p for p in root.iterdir() if p.is_file() and p.suffix.lower() in OVERLAY_EXTS] if root.is_dir() else []
 
 
 @command
 def overlay_library() -> list[dict]:
-    """The team's overlays, newest first."""
-    root = overlays_dir()
-    files = [p for p in root.iterdir() if p.is_file() and p.suffix.lower() in OVERLAY_EXTS] if root.is_dir() else []
-    return [_overlay_item(p) for p in sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)]
+    """The team's overlays, most used first, then newest."""
+    uses = _uses()
+    files = sorted(_overlay_files(overlays_dir()), key=lambda p: (-uses.get(p.name, 0), -p.stat().st_mtime))
+    return [_overlay_item(p, uses) for p in files]
+
+
+@command
+def overlay_suggestions() -> list[dict]:
+    """Overlays that come with the app."""
+    return [_overlay_item(p) for p in sorted(_overlay_files(STARTERS_DIR))]
 
 
 @command

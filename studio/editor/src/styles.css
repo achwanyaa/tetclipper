@@ -339,9 +339,10 @@ input[type='file'] { height: auto; padding: 6px; }
 .msg-meta { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 11px; color: var(--mu); }
 .notes { color: var(--mu); font-size: 12px; display: flex; flex-direction: column; gap: 3px; }
 .ai-chat .warn { color: var(--wn); font-weight: 600; padding: 0 16px 8px; }
-.ai-chips { margin: 0; padding: 0 16px 10px; }
-.ai-compose { border-top: 1px solid var(--ln); padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px; }
-.ai-compose textarea { min-height: 64px; max-height: 180px; border-radius: 12px; background: var(--sf2); border-color: transparent; font-size: 14px; }
+.ai-chips { margin: 0; padding: 0 16px 8px; gap: 5px; }
+.ai-chips .chip-btn { height: 26px; padding: 0 10px; font-size: 11.5px; }
+.ai-compose { border-top: 1px solid var(--ln); padding: 10px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+.ai-compose textarea { min-height: 52px; max-height: 180px; border-radius: 12px; background: var(--sf2); border-color: transparent; font-size: 14px; }
 .ai-compose .ctx { height: 36px; font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--mu); }
 .ai-compose .ctx.on { color: var(--ink); }
 .ai-compose .primary { height: 40px; padding: 0 22px; }
@@ -697,3 +698,18 @@ button.round-play:hover:not(:disabled) { background: var(--ac); filter: brightne
 .topbar > .steps, .topbar > .clip-picker { flex-shrink: 1; }
 .view-keep { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .view-keep[hidden] { display: none; }
+.insp-foot.slim { padding: 10px 16px 12px; gap: 8px; }
+.insp-foot.slim .more { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
+.insp-foot.slim .more > * { height: 34px; color: var(--ink); }
+.insp-foot.slim .more > .primary { color: var(--aci); }
+
+/* Team (admin) */
+.team-invite { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.team-invite-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.team-invite-row .field { flex: 1 1 200px; min-width: 0; }
+.team-invite-row input, .team-invite-row select { width: 100%; color: var(--ink); }
+.team-invite-row button { height: 40px; }
+.team-sent { color: var(--ok); font-weight: 600; }
+.team .record-table table { min-width: 640px; }
+.team .record-table select { height: 34px; color: var(--ink); }
+.team-email { font-weight: 400; }

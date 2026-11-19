@@ -83,14 +83,22 @@ def is_admin() -> bool:
     return bool(user and user.get("admin"))
 
 
-# Roles (Supabase app_metadata.role): admin, reviewer (the communication team),
-# anyone else edits. The desktop app's one user is the admin.
-ROLES = ("admin", "reviewer", "editor")
+# Roles (Supabase app_metadata.role): admin; head_reviewer (leads the
+# communication team: Review and Record); reviewer (Review only); anyone else
+# is an editor (Edit only). The desktop app's one user is the admin.
+ROLES = ("admin", "head_reviewer", "reviewer", "editor")
+REVIEW_ROLES = ("admin", "head_reviewer", "reviewer")
+# Commands that make or change videos (and cost GPU, render or AI time): editors and the admin only.
+EDIT_COMMANDS = {
+    "studio_cut", "studio_find", "studio_long", "studio_render", "studio_chat_send", "studio_matte",
+    "studio_doubts", "studio_save", "studio_undo", "studio_dead_air", "studio_stutters", "studio_attach",
+    "overlay_library_add", "review_submit",
+}
 LOCAL_USER = {"id": "local", "email": "", "name": "You", "admin": True, "role": "admin"}
 
 
 def _role(admin: bool, role: Any) -> str:
-    return "admin" if admin else "reviewer" if role == "reviewer" else "editor"
+    return "admin" if admin else role if role in ("head_reviewer", "reviewer") else "editor"
 
 
 def actor() -> dict:
@@ -106,7 +114,7 @@ def actor() -> dict:
 
 
 def can_review() -> bool:
-    return actor()["role"] in ("admin", "reviewer")
+    return actor()["role"] in REVIEW_ROLES
 
 
 def _read_json(path: Path, default: Any = None) -> Any:
@@ -507,7 +515,9 @@ async def health() -> dict:
 @app.get("/api/auth-config")
 async def auth_config() -> dict:
     """How the browser should sign in: none (desktop), supabase or token."""
-    return {"mode": "supabase" if AUTH == "supabase" else "token" if WEB_TOKEN else "none"}
+    return {"mode": "supabase" if AUTH == "supabase" else "token" if WEB_TOKEN else "none",
+            # Whether the admin can invite people from the app (needs the Supabase secret key).
+            "team": AUTH == "supabase" and bool(os.environ.get("SUPABASE_SECRET_KEY"))}
 
 
 @command
@@ -553,6 +563,8 @@ async def run_command(name: str, request: Request) -> JSONResponse:
     fn = COMMANDS.get(name)
     if fn is None:
         raise HTTPException(404, f"unknown command {name}")
+    if AUTH == "supabase" and name in EDIT_COMMANDS and actor()["role"] in ("head_reviewer", "reviewer"):
+        return JSONResponse("Your account is for reviewing; editing is for editors.", status_code=403)
     body = await request.body()
     args = json.loads(body) if body else {}
     try:
@@ -605,7 +617,8 @@ async def get_file(path: str, download: int = 0) -> FileResponse:
     # Only the user's own workspace, plus the shared music library and team
     # overlays. The desktop app's workspace is the whole home.
     file = Path(path).resolve()
-    roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve(), (home_dir() / "overlays").resolve()]
+    roots = [workspace_dir().resolve(), (home_dir() / "audio").resolve(), (home_dir() / "overlays").resolve(),
+             (Path(__file__).with_name("overlay_starters")).resolve()]
     if not any(root in file.parents for root in roots) or not file.is_file():
         raise HTTPException(404)
     return FileResponse(file, filename=file.name if download else None)
@@ -632,6 +645,7 @@ async def upload(request: Request, name: str) -> dict:
 
 from . import studio as _studio  # noqa: E402 — registers the studio_* commands
 from . import review as _review  # noqa: E402,F401 — registers the review_* commands and /api/review/file
+from . import users as _users  # noqa: E402,F401 — registers the users_* commands (admin)
 
 
 @app.get("/api/thumb")

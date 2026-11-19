@@ -39,7 +39,7 @@ export async function invoke<T = unknown>(name: string, args: Record<string, unk
 }
 
 /** How this server signs people in: none (desktop app), supabase (online) or token. */
-export async function authConfig(): Promise<{ mode: 'none' | 'supabase' | 'token' }> {
+export async function authConfig(): Promise<{ mode: 'none' | 'supabase' | 'token'; team?: boolean }> {
   const res = await fetch(`${API}/api/auth-config`)
   // A server from before online sign-in has no such route: it needs no sign-in.
   if (res.status === 404 && API === '') return { mode: 'none' }
@@ -239,7 +239,16 @@ export interface JobSummary {
 }
 
 // ---- review (server/review.py) ----
-export type Role = 'admin' | 'reviewer' | 'editor'
+export type Role = 'admin' | 'head_reviewer' | 'reviewer' | 'editor'
+export const ROLE_LABEL: Record<Role, string> = { admin: 'Admin', head_reviewer: 'Head reviewer', reviewer: 'Reviewer', editor: 'Editor' }
+/** What each role sees: editors edit, reviewers review, the head reviewer also sees the record. */
+export const ROLE_VIEWS: Record<Role, ('edit' | 'review' | 'record' | 'team')[]> = {
+  admin: ['edit', 'review', 'record', 'team'],
+  head_reviewer: ['review', 'record'],
+  reviewer: ['review'],
+  editor: ['edit']
+}
+export const ROLE_SEES: Record<Role, string> = { admin: 'Everything, and Team', head_reviewer: 'Review and Record', reviewer: 'Review only', editor: 'Editing only' }
 export type ReviewStatus = 'to_review' | 'needs_work' | 'good'
 export interface Person {
   id: string

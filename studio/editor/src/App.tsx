@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipSpecInput } from '@tetclipper/composition'
-import { authConfig, fileUrl, invoke, isAwake, onEvent, onWake, setAuth, setWorking, type AiSettings as AiSettingsData, type ClipData, type JobSummary, type ReviewItem, type ReviewStatus, type ReviewSummary, type Role } from './api'
+import { authConfig, fileUrl, invoke, isAwake, onEvent, onWake, setAuth, setWorking, type AiSettings as AiSettingsData, type ClipData, type JobSummary, ROLE_VIEWS, type ReviewItem, type ReviewStatus, type ReviewSummary, type Role } from './api'
 import { signOut, useSession } from './auth'
 import { AiSettings } from './components/AiSettings'
 import { Canvas } from './components/Canvas'
 import { Home } from './components/Home'
 import { NewClip, type CutArgs, type LongArgs, type FindArgs } from './components/NewClip'
 import { Record } from './components/Record'
+import { Team } from './components/Team'
 import { Review } from './components/Review'
 import { SignIn } from './components/SignIn'
 import { TopBar, type Step } from './components/TopBar'
@@ -45,7 +46,7 @@ export interface Account {
   name: string
 }
 
-export type View = 'edit' | 'review' | 'record'
+export type View = 'edit' | 'review' | 'record' | 'team'
 const REVIEW_POLL = 60 * 1000
 
 /** Sign-in gate. The desktop app's server needs no sign-in; the online one
@@ -124,8 +125,11 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
   const theme = useTheme()
   const isAdmin = !account || account.admin
   const role: Role = account?.role ?? 'admin' // the desktop app's one user does everything
+  // The desktop app has no sign-in, so no one to manage: no Team page there.
+  const views = account ? ROLE_VIEWS[role] : ROLE_VIEWS.admin.filter((v) => v !== 'team')
   const [screen, setScreen] = useState<'home' | 'new'>('home')
-  const [view, setView] = useState<View>('edit')
+  const [view, setViewRaw] = useState<View>(views[0])
+  const setView = useCallback((v: View) => setViewRaw(views.includes(v) ? v : views[0]), [views])
   const [reviews, setReviews] = useState<ReviewSummary[] | null>(null)
   const [reviewItem, setReviewItem] = useState<ReviewItem | null>(null) // the open clip's, if it was sent
   const [reviewFocus, setReviewFocus] = useState<{ id: string; status: ReviewStatus; n: number } | null>(null)
@@ -444,7 +448,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
     setView('edit')
     setOpen({ jobId, clip })
   }
-  const reviewer = role === 'admin' || role === 'reviewer'
+  const reviewer = role === 'admin' || role === 'head_reviewer' || role === 'reviewer'
   // The count beside Review: videos waiting for the team, or your own sent back.
   const reviewCount = (reviews ?? []).filter((i) => (reviewer ? i.status === 'to_review' : i.status === 'needs_work')).length
 
@@ -461,6 +465,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
         step={step}
         open={editing ? open : null}
         view={view}
+        views={views}
         onView={(v) => {
           setView(v)
           if (v === 'edit' && !open) setScreen('home')
@@ -512,6 +517,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
       {view === 'review' && (
         <Review items={reviews} role={role} onChanged={refreshReviews} setError={setError} onOpenClip={reviewer ? undefined : openClip} focus={reviewFocus} />
       )}
+      {view === 'team' && <Team setError={setError} />}
       {view === 'record' && (
         <Record
           items={reviews}
@@ -567,6 +573,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
           onDismissRun={() => setRun(null)}
           onDismissJob={(jobId) => invoke('studio_job_dismiss', { jobId }).then(refreshJobs).catch((e) => setError(String(e.message ?? e)))}
           onRetry={refreshJobs}
+          reviews={reviews}
         />
       )}
     </div>

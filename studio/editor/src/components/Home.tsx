@@ -1,5 +1,5 @@
 import { PRESETS } from '@tetclipper/composition'
-import { fmt, thumbUrl, type JobSummary } from '../api'
+import { STATUS_LABEL, fmt, thumbUrl, type JobSummary, type ReviewSummary } from '../api'
 import type { Run } from '../App'
 import type { FindArgs } from './NewClip'
 
@@ -18,6 +18,7 @@ interface Props {
   onDismissRun: () => void
   onDismissJob: (jobId: string) => void
   onRetry: () => void
+  reviews?: ReviewSummary[] | null // your clips' review status, shown on their cards
 }
 
 /** Until the download finishes the job has no title yet, only its id. */
@@ -46,7 +47,7 @@ function RunCard({ title, fraction, message, error, onDismiss }: { title: string
 }
 
 /** All clips: running jobs on top, then every clip grouped by the video it came from. */
-export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun, onDismissJob, onRetry }: Props) {
+export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun, onDismissJob, onRetry, reviews }: Props) {
   const clipCount = jobs.reduce((n, j) => n + j.clips.length, 0)
   const videos = new Set(jobs.filter((j) => j.clips.length).map((j) => j.title)).size
   // Running and failed jobs as the server sees them; the local card only covers
@@ -165,7 +166,11 @@ export function Home({ jobs, loadError, run, onOpen, onNew, onFind, onDismissRun
                       {clipName(c)}
                       <span>{c.style ? PRESETS[c.style as keyof typeof PRESETS]?.label ?? c.style : ''}</span>
                     </div>
-                    {c.rendered ? <span className="tag ok">Rendered</span> : <span className="tag">Not rendered</span>}
+                    {(() => {
+                      const r = reviews?.find((x) => x.jobId === job.id && x.clip === c.clip)
+                      if (r) return <span className={`status-pill ${r.status}`}>{r.status === 'needs_work' ? `${STATUS_LABEL.needs_work} · ${r.openNotes} note${r.openNotes === 1 ? '' : 's'}` : STATUS_LABEL[r.status]}</span>
+                      return c.rendered ? <span className="tag ok">Rendered</span> : <span className="tag">Not rendered</span>
+                    })()}
                   </div>
                 </button>
               ))}

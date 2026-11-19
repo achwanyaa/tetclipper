@@ -5,23 +5,37 @@ videos and the communication team who check and post them.
 
 ## Who does what
 
-- **Editors** make and edit clips, render them, and send them for review.
-- **The communication team** watches each video, says whether it's good or
-  needs work, and downloads good videos to post.
-- **The admin** can do both, and chooses the AI model.
+| Role | Sees | Does |
+|---|---|---|
+| **Editor** | Editing only | Makes and edits clips, renders them, sends them for review |
+| **Reviewer** | Review only | Watches each video, marks it Good or Needs work, downloads good ones to post |
+| **Head reviewer** | Review and Record | The same, plus the record of who edited, reviewed and downloaded what |
+| **Admin** | Everything | All of the above, chooses the AI model, and manages people on the **Team** page |
 
 If you see the wrong screens, ask the admin to check your role.
+
+## Admin: adding people
+
+1. Open **Team** in the top bar.
+2. Type the person's email (and name, if you like), pick their role, and press
+   **Send invite**. They get an email with a link to set a password.
+3. To change someone's role later, pick a new one in the list. It applies the
+   next time their page loads. You can't change your own role.
 
 ## Editors
 
 1. Open your clip. The tools are on the left; the video is in the middle; the
    timeline is along the bottom.
+   Clips the team sent back show **Needs work** on their card on the home screen.
 2. Edit as usual. To ask the AI for a change, use the **AI** tab and type what
    you want, for example "remove the dead air".
-3. To put a logo or GIF on the video, open **Overlays** and press **Add a photo,
+3. To put a logo or GIF on the video, open **Overlays**. The church logo is under
+   **Suggested** (animated, or as a still watermark); your team's own files are
+   under **Team overlays**, most used first. To add a new one, press **Add a photo,
    GIF or video**. Drag it on the video to move it, pull a corner to make it
    bigger or smaller, and drag its bar on the timeline to choose when it shows.
-4. Press **Render**. When it's done, press **Send for review**. You can add a
+4. Press **Render** (top right). When it's done, press **Send for review** at the
+   bottom of the left panel. You can add a
    short message for the team.
 5. If the team sends it back, the clip opens on the **Review** tab with their
    notes. Click **jump there** to see the spot, fix it, and tick **I fixed

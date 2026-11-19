@@ -47,7 +47,7 @@ def cmd(client, name, token=None, **args):
 
 def test_sign_in_is_required_except_auth_config(client):
     c, _ = client
-    assert c.get("/api/auth-config").json() == {"mode": "supabase"}
+    assert c.get("/api/auth-config").json()["mode"] == "supabase"
     assert cmd(c, "studio_jobs").status_code == 401
     assert cmd(c, "studio_jobs", "made-up").status_code == 401
     me = cmd(c, "me", "token-a").json()
@@ -217,3 +217,20 @@ def test_team_overlays_take_only_your_own_pictures_and_videos(client, tmp_path):
 
 def remove(c, token, file):
     return c.post("/api/cmd/overlay_library_remove", json={"name": file}, headers={"Authorization": f"Bearer {token}"})
+
+
+def test_suggested_overlays_come_with_the_app_and_the_most_used_come_first(client):
+    c, job = client
+    suggested = cmd(c, "overlay_suggestions", "token-b").json()
+    assert {s["kind"] for s in suggested} == {"gif", "image"} and all("ZOE" in s["name"] for s in suggested)
+    media = cmd(c, "me", "token-b").json()["media_token"]
+    assert c.get("/files", params={"path": suggested[0]["path"], "access_token": media}).status_code == 200
+    attached = cmd(c, "studio_attach", "token-a", jobId="job1", clip=0, path=suggested[0]["path"]).json()
+    assert (job / attached["src"]).stat().st_size == suggested[0]["size"]
+    # Team overlays: the most used first.
+    for name in ("a.png", "b.png"):
+        cmd(c, "overlay_library_add", "token-a", path=_upload(c, "token-a", name, b"x"))
+    lib = {i["name"]: i["path"] for i in cmd(c, "overlay_library", "token-a").json()}
+    for _ in range(2):
+        cmd(c, "studio_attach", "token-a", jobId="job1", clip=0, path=lib["a.png"])
+    assert [(i["name"], i["uses"]) for i in cmd(c, "overlay_library", "token-b").json()] == [("a.png", 2), ("b.png", 0)]

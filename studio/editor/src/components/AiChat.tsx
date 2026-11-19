@@ -20,6 +20,7 @@ export function AiChat({ chat, editor, lastChangeByAi, onUndo }: Props) {
   const [input, setInput] = useState('')
   const [withContext, setWithContext] = useState(true)
   const [menu, setMenu] = useState(false)
+  const [showChips, setShowChips] = useState(false)
   const [scripts, setScripts] = useState(false)
   const log = useRef<HTMLDivElement>(null)
   const pinned = useRef(true) // stay at the newest message unless the user scrolled up
@@ -134,10 +135,18 @@ export function AiChat({ chat, editor, lastChangeByAi, onUndo }: Props) {
 
       {!chat.available && <p className="warn small">{chat.notice ?? 'The AI chat is not set up yet. The admin can choose a model under ✦ AI model.'}</p>}
 
-      {!busy && (
+      {/* Quick asks: in full only while the chat is empty, so they never push the replies out of view. */}
+      {!busy && (messages.length === 0 || showChips) && (
         <div className="chips ai-chips">
           {CHIPS.map((c) => (
-            <button key={c} className="chip-btn" onClick={() => send(c)}>
+            <button
+              key={c}
+              className="chip-btn"
+              onClick={() => {
+                setShowChips(false)
+                send(c)
+              }}
+            >
               {c}
             </button>
           ))}
@@ -177,6 +186,11 @@ export function AiChat({ chat, editor, lastChangeByAi, onUndo }: Props) {
           >
             {withContext ? ctxLabel : 'no context'}
           </button>
+          {messages.length > 0 && !busy && (
+            <button type="button" className="ctx" aria-expanded={showChips} onClick={() => setShowChips((s) => !s)}>
+              Suggestions
+            </button>
+          )}
           <span className="spacer" />
           <button className="primary" disabled={busy || !input.trim()}>
             Send

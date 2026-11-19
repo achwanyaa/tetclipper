@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { View } from '../App'
-import type { JobSummary, Role } from '../api'
+import { ROLE_LABEL, type JobSummary, type Role } from '../api'
 import { STILL, clipName } from './Home'
 
 export type Step = 'Video' | 'Edit' | 'Render' | 'Share'
@@ -24,13 +24,14 @@ interface Props {
   onUndo: () => void
   render?: TopRender | null // the small Render button, top right, while a clip is open
   view: View
+  views: View[]
   onView: (v: View) => void
   reviewCount: number
 }
 
 export type TopRender = { state: 'idle'; onRender: () => void } | { state: 'rendering'; pct: number } | { state: 'fresh'; download: string }
 
-export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme, engine, onAi, account, onSignOut, onHome, onOpen, onUndo, render, view, onView, reviewCount }: Props) {
+export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme, engine, onAi, account, onSignOut, onHome, onOpen, onUndo, render, view, views, onView, reviewCount }: Props) {
   const [picker, setPicker] = useState(false)
   const [menu, setMenu] = useState(false)
   const job = open ? jobs.find((j) => j.id === open.jobId) : undefined
@@ -42,14 +43,16 @@ export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme,
         tetclipper
       </button>
 
+      {views.length > 1 && (
       <nav className="views" aria-label="Workspace">
-        {(['edit', 'review', 'record'] as View[]).map((v) => (
+        {views.map((v) => (
           <button key={v} className={v === view ? 'on' : ''} aria-current={v === view ? 'page' : undefined} onClick={() => onView(v)}>
-            {v === 'edit' ? 'Edit' : v === 'review' ? 'Review' : 'Record'}
+            {v === 'edit' ? 'Edit' : v === 'review' ? 'Review' : v === 'record' ? 'Record' : 'Team'}
             {v === 'review' && reviewCount > 0 && <span className="count">{reviewCount}</span>}
           </button>
         ))}
       </nav>
+      )}
 
       {open && title ? (
         <button className="clip-picker" onClick={() => setPicker((p) => !p)}>
@@ -126,7 +129,7 @@ export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme,
               </span>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>{account.email}</div>
-                <div className="small muted">{account.role === 'admin' ? 'Admin' : account.role === 'reviewer' ? 'Communication team' : 'Editor'}</div>
+                <div className="small muted">{ROLE_LABEL[account.role]}</div>
               </div>
             </div>
             <button
