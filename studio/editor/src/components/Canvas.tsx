@@ -11,7 +11,7 @@ import {
   type ClipSpecInput,
   type Timeline as TL
 } from '@tetclipper/composition'
-import { fileUrl, invoke, resolveForPlayer, type ClipData } from '../api'
+import { STATUS_LABEL, fileUrl, invoke, resolveForPlayer, type ClipData, type ReviewItem } from '../api'
 import type { EditorState, Run } from '../App'
 import { stopPreview } from '../audioPreview'
 import { useChat } from '../chat'
@@ -21,6 +21,7 @@ import { IntroPanel } from './IntroPanel'
 import { MusicPanel } from './MusicPanel'
 import { OverlayLayer } from './OverlayLayer'
 import { OverlaysPanel } from './OverlaysPanel'
+import { ReviewTab } from './ReviewTab'
 import { StylePanel } from './StylePanel'
 import { Timeline, fxLabel, type PlayerControls } from './Timeline'
 import { Transcript } from './Transcript'
@@ -39,9 +40,10 @@ export interface PanelProps {
   pausePlayer: () => void
 }
 
-type Tab = 'AI' | 'Captions' | 'Look' | 'Intro & outro' | 'Music' | 'Effects' | 'Overlays' | 'Trim'
+type Tab = 'Review' | 'AI' | 'Captions' | 'Look' | 'Intro & outro' | 'Music' | 'Effects' | 'Overlays' | 'Trim'
 
 // Rail buttons: label, short label, icon path (24×24, stroked).
+const REVIEW_TAB = { id: 'Review' as Tab, short: 'Review', icon: 'M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9' }
 const TABS: { id: Tab; short: string; icon: string }[] = [
   { id: 'AI', short: 'AI', icon: 'M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z' },
   { id: 'Captions', short: 'Captions', icon: 'M4 6h16v12H4zM7 14h4M13 14h4M7 10h10' },
@@ -65,6 +67,10 @@ interface Props {
   setError: (e: string | null) => void
   online?: boolean // hosted app: Telegram is linked per server, not per user, so it's hidden
   admin?: boolean
+  review?: ReviewItem | null // this clip's review, if it was sent
+  onSendForReview?: (message: string | null) => void
+  onRenderAndSend?: (message: string | null) => void
+  onNoteFixed?: (noteId: string, fixed: boolean) => void
 }
 
 const clock = (frames: number) => {
@@ -74,9 +80,16 @@ const clock = (frames: number) => {
 
 /** Edit step: every tool and the AI chat on the left, a big live preview, and
  *  the lane timeline along the bottom. */
-export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRender, setError, online = false, admin = false }: Props) {
+export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRender, setError, online = false, admin = false, review = null, onSendForReview, onRenderAndSend, onNoteFixed }: Props) {
   const player = useRef<PlayerRef>(null)
+  // A clip sent back with notes opens on them.
   const [tab, setTab] = useState<Tab>('AI')
+  const shownReview = useRef<string | null>(null)
+  useEffect(() => {
+    const key = review ? `${review.id}/${review.version}/${review.status}` : null
+    if (key && key !== shownReview.current && review?.status === 'needs_work') setTab('Review')
+    shownReview.current = key
+  }, [review])
   const [frame, setFrame] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [selectedEffect, setSelectedEffect] = useState<number | null>(null)
@@ -224,12 +237,19 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
   const doubts = parsed?.doubts?.length ?? 0
   const lastReason = data.history[data.history.length - 1]?.reason ?? ''
   const lastChangeByAi = /^ai\b/i.test(lastReason)
+  const latestVersion = data.history[data.history.length - 1]?.version ?? 0
+  const fresh = !!data.render && data.render.spec_version === latestVersion
+  const sentLatest = !!review && review.versions[review.versions.length - 1]?.specVersion === latestVersion
+  const rendering = run?.kind === 'render' && run.jobId === data.jobId && run.clip === data.clip && !run.error
+  const reviewNotes = review && review.status === 'needs_work' ? review.notes.filter((n) => n.version === review.version) : []
+  const openNotes = reviewNotes.filter((n) => !n.fixed).length
+  const noteMarks = reviewNotes.filter((n) => !n.fixed && n.time !== null).map((n) => ({ frame: Math.round((n.time ?? 0) * FPS), label: n.text }))
 
   return (
     <div className="editor">
       <aside className="side">
         <nav className="rail" aria-label="Tools">
-          {TABS.map((t) => (
+          {(review ? [REVIEW_TAB, ...TABS] : TABS).map((t) => (
             <button key={t.id} className={t.id === tab ? 'on' : ''} aria-current={t.id === tab ? 'page' : undefined} onClick={() => setTab(t.id)} title={t.id}>
               <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                 <path d={t.icon} />
@@ -237,6 +257,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
               <span>{t.short}</span>
               {t.id === 'Captions' && doubts > 0 && <i className="badge" title={`${doubts} doubtful captions`} />}
               {t.id === 'AI' && chat.busy && tab !== 'AI' && <i className="badge ac" title="AI is working" />}
+              {t.id === 'Review' && openNotes > 0 && <i className="count" title={`${openNotes} notes to fix`}>{openNotes}</i>}
             </button>
           ))}
         </nav>
@@ -253,6 +274,18 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
                 <button onClick={() => setTab('Captions')}>Check now</button>
               </div>
             )}
+            {tab === 'Review' && review && (
+              <ReviewTab
+                item={review}
+                fresh={fresh}
+                sentLatest={sentLatest}
+                rendering={rendering}
+                onJump={(s) => seekFrame(Math.round(s * FPS))}
+                onFixed={(id, fixed) => onNoteFixed?.(id, fixed)}
+                onSend={(m) => onSendForReview?.(m)}
+                onRenderAndSend={(m) => onRenderAndSend?.(m)}
+              />
+            )}
             {tab === 'AI' && <AiChat chat={chat} editor={editor} lastChangeByAi={lastChangeByAi} onUndo={undo} />}
             {tab === 'Captions' && <Transcript {...panel} />}
             {tab === 'Look' && <StylePanel {...panel} />}
@@ -262,7 +295,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
             {tab === 'Overlays' && <OverlaysPanel {...panel} selected={selectedOverlay} setSelected={setSelectedOverlay} admin={admin} />}
             {tab === 'Trim' && <TrimPanel {...panel} />}
           </div>
-          <RenderFooter data={data} run={run} onRender={onRender} setError={setError} online={online} />
+          <RenderFooter data={data} run={run} onRender={onRender} setError={setError} online={online} review={review} onSend={() => onSendForReview?.(null)} onReviewTab={() => setTab('Review')} />
         </div>
       </aside>
 
@@ -328,6 +361,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
           selectedOverlay={selectedOverlay}
           onOverlay={openOverlay}
           onOverlayTime={timeOverlay}
+          marks={noteMarks}
         />
       )}
     </div>
@@ -336,13 +370,34 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
 
 /** Render / share area at the foot of the left panel: rendering, failed,
  *  never rendered, up to date, or edited since the last render. */
-function RenderFooter({ data, run, onRender, setError, online }: { data: ClipData; run: Run | null; onRender: () => void; setError: (e: string | null) => void; online: boolean }) {
+function RenderFooter({
+  data,
+  run,
+  onRender,
+  setError,
+  online,
+  review,
+  onSend,
+  onReviewTab
+}: {
+  data: ClipData
+  run: Run | null
+  onRender: () => void
+  setError: (e: string | null) => void
+  online: boolean
+  review: ReviewItem | null
+  onSend: () => void
+  onReviewTab: () => void
+}) {
   const [sending, setSending] = useState(false)
   const rendering = run?.kind === 'render' && run.jobId === data.jobId && run.clip === data.clip
   const latest = data.history[data.history.length - 1]?.version ?? 0
   const r = data.render
   const fresh = !!r && r.spec_version === latest
   const download = r ? fileUrl(r.output, true) : ''
+  // Online, a finished render goes to the communication team next.
+  const sentThis = !!review && review.versions[review.versions.length - 1]?.specVersion === latest
+  const offerSend = online && fresh && (!sentThis || review?.status === 'needs_work')
 
   const telegram = (
     <button
@@ -395,6 +450,14 @@ function RenderFooter({ data, run, onRender, setError, online }: { data: ClipDat
           <span className="dot" />
           Not rendered yet
         </div>
+      ) : fresh && sentThis && review ? (
+        <div className="status">
+          <span className={`dot ${review.status === 'good' ? 'ok' : review.status === 'needs_work' ? 'wn' : 'ac'}`} />
+          {review.status === 'to_review' ? 'Sent for review' : STATUS_LABEL[review.status]} ·{' '}
+          <button className="link small" onClick={onReviewTab}>
+            see review
+          </button>
+        </div>
       ) : fresh ? (
         <div className="status">
           <span className="dot ok" />
@@ -407,7 +470,11 @@ function RenderFooter({ data, run, onRender, setError, online }: { data: ClipDat
         </div>
       )}
 
-      {r && fresh ? (
+      {offerSend ? (
+        <button className="primary big" onClick={onSend}>
+          Send for review
+        </button>
+      ) : r && fresh ? (
         <a className="btn primary big" href={download}>
           Download
         </a>
@@ -417,11 +484,16 @@ function RenderFooter({ data, run, onRender, setError, online }: { data: ClipDat
         </button>
       )}
 
-      {r && (!fresh || !online) && (
+      {r && (!fresh || !online || offerSend) && (
         <div className="more">
           {!fresh && (
             <a className="btn" href={download}>
               Download older
+            </a>
+          )}
+          {fresh && offerSend && (
+            <a className="btn" href={download}>
+              Download
             </a>
           )}
           {!online && telegram}

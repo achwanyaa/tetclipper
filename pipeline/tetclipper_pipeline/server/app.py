@@ -83,6 +83,32 @@ def is_admin() -> bool:
     return bool(user and user.get("admin"))
 
 
+# Roles (Supabase app_metadata.role): admin, reviewer (the communication team),
+# anyone else edits. The desktop app's one user is the admin.
+ROLES = ("admin", "reviewer", "editor")
+LOCAL_USER = {"id": "local", "email": "", "name": "You", "admin": True, "role": "admin"}
+
+
+def _role(admin: bool, role: Any) -> str:
+    return "admin" if admin else "reviewer" if role == "reviewer" else "editor"
+
+
+def actor() -> dict:
+    """Who is making this request: id, name, email, role."""
+    if AUTH != "supabase":
+        return dict(LOCAL_USER)
+    user = USER.get()
+    if not user:
+        raise CommandError("Sign in first.")
+    email = user.get("email") or ""
+    role = user.get("role") if user.get("role") in ROLES else _role(bool(user.get("admin")), user.get("role"))
+    return {**user, "role": role, "name": user.get("name") or email.split("@")[0] or "Someone"}
+
+
+def can_review() -> bool:
+    return actor()["role"] in ("admin", "reviewer")
+
+
 def _read_json(path: Path, default: Any = None) -> Any:
     try:
         raw = path.read_bytes()
@@ -411,7 +437,9 @@ async def _supabase_user(token: str) -> dict | None:
     data = res.json()
     email = (data.get("email") or "").lower()
     role = (data.get("app_metadata") or {}).get("role")
-    user = {"id": data["id"], "email": email, "admin": email in ADMINS or role == "admin"}
+    admin = email in ADMINS or role == "admin"
+    name = str((data.get("user_metadata") or {}).get("name") or "").strip() or email.split("@")[0] or "Someone"
+    user = {"id": data["id"], "email": email, "admin": admin, "role": _role(admin, role), "name": name[:60]}
     if len(_verified) > 500:
         _verified.clear()
     _verified[digest] = (user, time.time() + 300)
@@ -421,7 +449,8 @@ async def _supabase_user(token: str) -> dict | None:
 def media_token(user: dict) -> str:
     """mt.<payload>.<sig>: lets <video> tags and the event stream (which can't
     send headers) reach this user's files for a day."""
-    payload = base64.urlsafe_b64encode(json.dumps({"id": user["id"], "exp": int(time.time()) + MEDIA_TTL}).encode()).decode().rstrip("=")
+    claims = {"id": user["id"], "role": user.get("role", "editor"), "name": user.get("name", ""), "exp": int(time.time()) + MEDIA_TTL}
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
     sig = hmac.new(MEDIA_SECRET, payload.encode(), hashlib.sha256).hexdigest()
     return f"mt.{payload}.{sig}"
 
@@ -434,7 +463,11 @@ def _media_user(token: str) -> dict | None:
         data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
     except (ValueError, TypeError):
         return None
-    return {"id": data["id"], "email": "", "admin": False} if data.get("exp", 0) > time.time() else None
+    if data.get("exp", 0) <= time.time():
+        return None
+    role = data.get("role") if data.get("role") in ROLES else "editor"
+    # Admin rights stay with the sign-in token: a media token only reads files.
+    return {"id": data["id"], "email": "", "admin": False, "role": role, "name": str(data.get("name") or "")}
 
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9-]{8,64}$")
@@ -450,7 +483,7 @@ async def _require_token(request: Request, call_next):
         token = header[7:] if header.lower().startswith("bearer ") else request.query_params.get("access_token", "")
         if token.startswith("mt."):
             # Media tokens only open the read-only routes that can't send headers.
-            user = _media_user(token) if path in ("/files", "/api/events", "/api/thumb") else None
+            user = _media_user(token) if path in ("/files", "/api/events", "/api/thumb", "/api/review/file") else None
         else:
             user = await _supabase_user(token) if token else None
         if not user or not _SAFE_ID.match(user["id"]):
@@ -481,10 +514,13 @@ async def auth_config() -> dict:
 def me() -> dict:
     """Who is signed in, whether they're the admin, and their media token."""
     user = USER.get()
+    who = actor()
     return {
         "mode": "supabase" if AUTH == "supabase" else "none",
         "user": {"id": user["id"], "email": user["email"]} if user else None,
         "admin": is_admin(),
+        "role": who["role"],
+        "name": who["name"],
         "media_token": media_token(user) if user else None,
     }
 
@@ -595,6 +631,7 @@ async def upload(request: Request, name: str) -> dict:
 
 
 from . import studio as _studio  # noqa: E402 — registers the studio_* commands
+from . import review as _review  # noqa: E402,F401 — registers the review_* commands and /api/review/file
 
 
 @app.get("/api/thumb")

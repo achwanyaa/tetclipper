@@ -136,6 +136,15 @@ export function fileUrl(path: string, download = false): string {
   return withMedia(`${API}/files?path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`)
 }
 
+/** A video sent for review (or its card picture), for <video>/<img> and downloads. */
+export function reviewFileUrl(id: string, opts: { download?: boolean; thumb?: boolean; v?: number | string } = {}): string {
+  const q = new URLSearchParams({ id })
+  if (opts.download) q.set('download', '1')
+  if (opts.thumb) q.set('what', 'thumb')
+  if (opts.v !== undefined) q.set('v', String(opts.v))
+  return withMedia(`${API}/api/review/file?${q}`)
+}
+
 /** A frame of one clip as it will look (made on the server; `version` changes with the clip). */
 export function thumbUrl(jobId: string, clip: number, version: number): string {
   return withMedia(`${API}/api/thumb?job=${encodeURIComponent(jobId)}&clip=${clip}&v=${version}`)
@@ -227,6 +236,72 @@ export interface JobSummary {
   progress?: JobProgress | null
   res?: number | null // the source video's short side: the p in 480p, landscape or vertical
   clips: { clip: number; rendered: boolean; thumb?: number; style: string | null; score: number | null; summary: string | null }[]
+}
+
+// ---- review (server/review.py) ----
+export type Role = 'admin' | 'reviewer' | 'editor'
+export type ReviewStatus = 'to_review' | 'needs_work' | 'good'
+export interface Person {
+  id: string
+  name: string
+  email: string
+}
+export interface ReviewNote {
+  id: string
+  version: number
+  time: number | null // seconds into the rendered video; null = the whole video
+  text: string
+  by: Person
+  at: string
+  fixed: boolean
+}
+export interface ReviewEvent {
+  kind: 'sent' | 'needs_work' | 'good' | 'downloaded'
+  by: Person
+  at: string
+  version: number
+}
+export interface ReviewSummary {
+  id: string
+  owner: Person
+  jobId: string
+  clip: number
+  title: string
+  format: 'vertical' | 'landscape'
+  seconds: number
+  status: ReviewStatus
+  version: number
+  reviewer: Person | null
+  updated: string
+  sentAt: string
+  firstSent: string | null
+  message: string | null
+  sentBack: number
+  goodFirstTime: boolean
+  openNotes: number
+  lastDownload: ReviewEvent | null
+}
+export interface ReviewItem extends Omit<ReviewSummary, 'sentAt' | 'firstSent' | 'message' | 'sentBack' | 'goodFirstTime' | 'openNotes' | 'lastDownload'> {
+  versions: { n: number; specVersion: number; sentAt: string; message: string | null }[]
+  notes: ReviewNote[]
+  events: ReviewEvent[]
+}
+
+export const STATUS_LABEL: Record<ReviewStatus, string> = { to_review: 'To review', needs_work: 'Needs work', good: 'Good' }
+
+/** "today 10:42", "yesterday 4:10 pm", "Mon 17 Nov" — for review times. */
+export function when(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const now = new Date()
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diff = Math.round((day(now) - day(d)) / 86400000)
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  if (diff === 0) return `today ${time}`
+  if (diff === 1) return `yesterday ${time}`
+  if (diff < 7) return `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`
+  return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
 export type ServerEvent =

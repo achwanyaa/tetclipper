@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipSpecInput } from '@tetclipper/composition'
-import { authConfig, fileUrl, invoke, isAwake, onEvent, onWake, setAuth, setWorking, type AiSettings as AiSettingsData, type ClipData, type JobSummary } from './api'
+import { authConfig, fileUrl, invoke, isAwake, onEvent, onWake, setAuth, setWorking, type AiSettings as AiSettingsData, type ClipData, type JobSummary, type ReviewItem, type ReviewStatus, type ReviewSummary, type Role } from './api'
 import { signOut, useSession } from './auth'
 import { AiSettings } from './components/AiSettings'
 import { Canvas } from './components/Canvas'
 import { Home } from './components/Home'
 import { NewClip, type CutArgs, type LongArgs, type FindArgs } from './components/NewClip'
+import { Record } from './components/Record'
+import { Review } from './components/Review'
 import { SignIn } from './components/SignIn'
 import { TopBar, type Step } from './components/TopBar'
 import { useTheme } from './theme'
@@ -31,13 +33,20 @@ interface Me {
   mode: 'none' | 'supabase'
   user: { id: string; email: string } | null
   admin: boolean
+  role?: Role
+  name?: string
   media_token: string | null
 }
 
 export interface Account {
   email: string
   admin: boolean
+  role: Role
+  name: string
 }
+
+export type View = 'edit' | 'review' | 'record'
+const REVIEW_POLL = 60 * 1000
 
 /** Sign-in gate. The desktop app's server needs no sign-in; the online one
  *  (Supabase) shows the sign-in screen until there's a session. */
@@ -103,13 +112,24 @@ export function App() {
   }
   if (mode === 'supabase' && stage === 'set-password') return <SignIn setPasswordMode onPasswordSet={() => setStage('signed-in')} />
   if (mode === 'supabase' && stage !== 'signed-in') return <SignIn />
-  return <Studio account={me?.user ? { email: me.user.email, admin: me.admin } : null} onSignOut={mode === 'supabase' ? signOut : undefined} />
+  return (
+    <Studio
+      account={me?.user ? { email: me.user.email, admin: me.admin, role: me.role ?? (me.admin ? 'admin' : 'editor'), name: me.name ?? me.user.email } : null}
+      onSignOut={mode === 'supabase' ? signOut : undefined}
+    />
+  )
 }
 
 function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: () => void }) {
   const theme = useTheme()
   const isAdmin = !account || account.admin
+  const role: Role = account?.role ?? 'admin' // the desktop app's one user does everything
   const [screen, setScreen] = useState<'home' | 'new'>('home')
+  const [view, setView] = useState<View>('edit')
+  const [reviews, setReviews] = useState<ReviewSummary[] | null>(null)
+  const [reviewItem, setReviewItem] = useState<ReviewItem | null>(null) // the open clip's, if it was sent
+  const [reviewFocus, setReviewFocus] = useState<{ id: string; status: ReviewStatus; n: number } | null>(null)
+  const sendAfterRender = useRef<{ jobId: string; clip: number; message: string | null } | null>(null)
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [open, setOpen] = useState<{ jobId: string; clip: number } | null>(null)
@@ -137,19 +157,83 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
       .catch((e) => setLoadError(String(e.message ?? e)))
   }, [])
 
-  const loadClip = useCallback(async (jobId: string, clip: number) => {
+  const refreshReviews = useCallback(() => {
+    invoke<ReviewSummary[]>('review_list')
+      .then(setReviews)
+      .catch(() => undefined)
+  }, [])
+  const loadReview = useCallback((jobId: string, clip: number) => {
+    invoke<ReviewItem | null>('review_for_clip', { jobId, clip })
+      .then((r) => {
+        const cur = openRef.current
+        if (cur && cur.jobId === jobId && cur.clip === clip) setReviewItem(r)
+      })
+      .catch(() => undefined)
+  }, [])
+
+  const loadClip = useCallback(
+    async (jobId: string, clip: number) => {
+      try {
+        const d = await invoke<ClipData>('studio_clip', { jobId, clip })
+        setData(d)
+        setSpec(d.spec)
+        setEditor({ playhead: null, selection: null })
+        setError(null)
+        loadReview(jobId, clip)
+      } catch (e) {
+        setError(String((e as Error).message ?? e))
+      }
+    },
+    [loadReview]
+  )
+
+  useEffect(refreshJobs, [refreshJobs])
+
+  // The review list: on start, when the tab comes back, and every minute while
+  // someone is here (never from a hidden or idle tab, so the server can sleep).
+  useEffect(() => {
+    refreshReviews()
+    const onVisible = () => !document.hidden && refreshReviews()
+    document.addEventListener('visibilitychange', onVisible)
+    const timer = window.setInterval(() => isAwake() && refreshReviews(), REVIEW_POLL)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.clearInterval(timer)
+    }
+  }, [refreshReviews])
+  useEffect(() => {
+    if (view !== 'edit') refreshReviews()
+  }, [view, refreshReviews])
+
+  /** Send the open clip's current render for review. */
+  const sendForReview = useCallback(
+    async (message: string | null, target?: { jobId: string; clip: number }) => {
+      const cur = target ?? openRef.current
+      if (!cur) return
+      try {
+        await invoke('review_submit', { jobId: cur.jobId, clip: cur.clip, message })
+        loadReview(cur.jobId, cur.clip)
+        refreshReviews()
+      } catch (e) {
+        setError(String((e as Error).message ?? e))
+      }
+    },
+    [loadReview, refreshReviews]
+  )
+  const noteFixed = useCallback(async (noteId: string, fixed: boolean) => {
+    const item = reviewItemRef.current
+    if (!item) return
+    // Tick at once; the server's answer (or the old state, if it fails) follows.
+    setReviewItem((r) => (r && r.id === item.id ? { ...r, notes: r.notes.map((n) => (n.id === noteId ? { ...n, fixed } : n)) } : r))
     try {
-      const d = await invoke<ClipData>('studio_clip', { jobId, clip })
-      setData(d)
-      setSpec(d.spec)
-      setEditor({ playhead: null, selection: null })
-      setError(null)
+      setReviewItem(await invoke<ReviewItem>('review_note_fixed', { id: item.id, noteId, fixed }))
     } catch (e) {
+      setReviewItem((r) => (r && r.id === item.id ? item : r))
       setError(String((e as Error).message ?? e))
     }
   }, [])
-
-  useEffect(refreshJobs, [refreshJobs])
+  const reviewItemRef = useRef(reviewItem)
+  reviewItemRef.current = reviewItem
   useEffect(() => {
     if (isAdmin) invoke<AiSettingsData>('ai_settings_get').then(setAi).catch(() => undefined)
   }, [isAdmin])
@@ -181,6 +265,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
     if (finished.progress?.state === 'done' && finished.clips.length && !openRef.current) setOpen({ jobId: finished.id, clip: 0 })
   }, [jobs])
   useEffect(() => {
+    setReviewItem(null)
     if (open) loadClip(open.jobId, open.clip)
     else {
       setData(null)
@@ -251,6 +336,9 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
           const ok = ev.event === 'result' && ev.ok
           const err = ev.event === 'result' ? ev.error : `pipeline exited (${ev.code})`
           refreshJobs()
+          const send = sendAfterRender.current
+          const sendThis = r.kind === 'render' && send && send.jobId === r.jobId && send.clip === r.clip
+          if (sendThis) sendAfterRender.current = null
           if (!ok) {
             setRun({ ...r, error: err ?? 'failed', fraction: 1 })
             return
@@ -258,9 +346,11 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
           setRun(null)
           if ((r.kind === 'cut' || r.kind === 'find') && ev.event === 'result' && ev.job_id) setOpen({ jobId: ev.job_id, clip: 0 })
           if (r.kind === 'render' && cur) loadClip(cur.jobId, cur.clip)
+          // "Render and send for review again": the render is done, send it.
+          if (sendThis && send) sendForReview(send.message, { jobId: send.jobId, clip: send.clip })
         }
       }),
-    [refreshJobs, loadClip]
+    [refreshJobs, loadClip, sendForReview]
   )
 
   /** Apply an edit locally at once; persist it after a short pause (sliders). */
@@ -304,9 +394,20 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
     try {
       await invoke('studio_render', open)
     } catch (e) {
+      sendAfterRender.current = null
       setRun((r) => (r ? { ...r, error: String((e as Error).message ?? e) } : r))
     }
   }, [open])
+  /** Render, then send for review when the render is done. If the tab closes
+   *  first, "Send for review" is simply there next time. */
+  const renderAndSend = useCallback(
+    (message: string | null) => {
+      if (!open) return
+      sendAfterRender.current = { ...open, message }
+      startRender()
+    },
+    [open, startRender]
+  )
 
   const startJob = useCallback(async (kind: 'cut' | 'find' | 'long', args: CutArgs | FindArgs | LongArgs) => {
     setRun(kind === 'long' ? { kind: 'cut', title: 'Preparing the full video', fraction: 0, message: 'Starting…' } : { kind, fraction: 0, message: 'Starting…' })
@@ -322,20 +423,35 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
   const goHome = () => {
     setOpen(null)
     setScreen('home')
+    setView('edit')
     refreshJobs()
   }
+  const openClip = (jobId: string, clip: number) => {
+    setView('edit')
+    setOpen({ jobId, clip })
+  }
+  const reviewer = role === 'admin' || role === 'reviewer'
+  // The count beside Review: videos waiting for the team, or your own sent back.
+  const reviewCount = (reviews ?? []).filter((i) => (reviewer ? i.status === 'to_review' : i.status === 'needs_work')).length
 
   // Which of Video → Edit → Render → Share we're on.
   const latest = data?.history[data.history.length - 1]?.version ?? 0
   const rendering = !!(run?.kind === 'render' && open && run.jobId === open.jobId && run.clip === open.clip && !run.error)
-  const step: Step | null = open ? (rendering ? 'Render' : data?.render && data.render.spec_version === latest ? 'Share' : 'Edit') : screen === 'new' ? 'Video' : null
+  const editing = view === 'edit'
+  const step: Step | null = !editing ? null : open ? (rendering ? 'Render' : data?.render && data.render.spec_version === latest ? 'Share' : 'Edit') : screen === 'new' ? 'Video' : null
   const jobBusy = (run?.kind === 'cut' || run?.kind === 'find') && !run.error
 
   return (
     <div className="app">
       <TopBar
         step={step}
-        open={open}
+        open={editing ? open : null}
+        view={view}
+        onView={(v) => {
+          setView(v)
+          if (v === 'edit' && !open) setScreen('home')
+        }}
+        reviewCount={reviewCount}
         title={data?.title ?? null}
         style={spec?.captions?.style ?? null}
         jobs={jobs}
@@ -347,10 +463,10 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
         account={account}
         onSignOut={onSignOut}
         onHome={goHome}
-        onOpen={(jobId, clip) => setOpen({ jobId, clip })}
+        onOpen={openClip}
         onUndo={undo}
         render={
-          open && data
+          editing && open && data
             ? rendering
               ? { state: 'rendering', pct: Math.round((run?.fraction ?? 0) * 100) }
               : data.render && data.render.spec_version === latest
@@ -379,7 +495,18 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
         </div>
       )}
 
-      {open ? (
+      {view === 'review' ? (
+        <Review items={reviews} role={role} onChanged={refreshReviews} setError={setError} onOpenClip={reviewer ? undefined : openClip} focus={reviewFocus} />
+      ) : view === 'record' ? (
+        <Record
+          items={reviews}
+          role={role}
+          onOpen={(id, status) => {
+            setReviewFocus({ id, status, n: Date.now() })
+            setView('review')
+          }}
+        />
+      ) : open ? (
         data && spec ? (
           <Canvas
             key={`${data.jobId}/${data.clip}`}
@@ -394,6 +521,10 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
             setError={setError}
             online={!!account}
             admin={isAdmin}
+            review={reviewItem}
+            onSendForReview={(message) => sendForReview(message)}
+            onRenderAndSend={renderAndSend}
+            onNoteFixed={noteFixed}
           />
         ) : (
           <div className="home">
@@ -407,7 +538,7 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
           jobs={jobs}
           loadError={loadError}
           run={run}
-          onOpen={(jobId, clip) => setOpen({ jobId, clip })}
+          onOpen={openClip}
           onNew={() => setScreen('new')}
           onFind={(a) => startJob('find', a)}
           onDismissRun={() => setRun(null)}
