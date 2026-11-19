@@ -54,6 +54,7 @@ export function OverlayLayer({ overlays, timeline, frame, frameWidth, frameHeigh
     e.stopPropagation()
     e.preventDefault()
     onSelect(o.id)
+    ;(e.currentTarget.closest(".ov-box") as HTMLElement | null)?.focus() // so the arrow keys nudge it next
     e.currentTarget.setPointerCapture(e.pointerId)
     op.current = { id: o.id, mode, startX: e.clientX, startY: e.clientY, base: o, raf: 0, next: null }
   }

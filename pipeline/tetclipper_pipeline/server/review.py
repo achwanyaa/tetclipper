@@ -18,6 +18,8 @@ command checks this itself.
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
 import re
 import shutil
@@ -33,7 +35,9 @@ from fastapi.responses import FileResponse
 from ..spec import store
 from .app import CommandError, actor, app, command, home_dir
 
+log = logging.getLogger(__name__)
 STATUSES = ("to_review", "needs_work", "good")
+EVENTS_KEEP = 300  # the log stays small; counts that matter (sent back) are kept below that
 NOTE_MAX = 2000
 NOTES_MAX = 40
 _lock = threading.Lock()  # one web container in normal use (modal_app.py); this guards read-modify-write in it
@@ -66,22 +70,48 @@ def _files(item_id: str) -> Path:
     return review_dir() / "files" / item_id
 
 
+def _well_formed(item) -> bool:
+    """A file someone edited by hand or a half-finished write must not break
+    everyone's list: anything not shaped like an item is skipped."""
+    return (isinstance(item, dict) and isinstance(item.get("id"), str) and isinstance(item.get("owner"), dict)
+            and isinstance(item["owner"].get("id"), str) and isinstance(item.get("version"), int)
+            and item.get("status") in STATUSES and isinstance(item.get("versions"), list)
+            and isinstance(item.get("notes"), list) and isinstance(item.get("events"), list))
+
+
 def load(item_id: str) -> dict | None:
     path = _item_path(item_id)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        item = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    if not _well_formed(item):
+        log.warning("review item %s is damaged; skipped", item_id)
+        return None
+    return item
+
+
+def _replace(src: Path, dest: Path) -> None:
+    """os.replace, retried: on Windows a file being read can't be replaced for a moment."""
+    for attempt in range(20):
+        try:
+            os.replace(src, dest)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def save(item: dict) -> dict:
     """Write atomically: a reader never sees half a file."""
     item["updated"] = _now()
+    item["events"] = item["events"][-EVENTS_KEEP:]
     path = _item_path(item["id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(item, indent=1, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    _replace(tmp, path)
     return item
 
 
@@ -90,14 +120,17 @@ def all_items() -> list[dict]:
     out = []
     for path in root.glob("*.json") if root.is_dir() else []:
         try:
-            out.append(json.loads(path.read_text(encoding="utf-8")))
+            item = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        if _well_formed(item):
+            out.append(item)
     return sorted(out, key=lambda i: i.get("updated", ""), reverse=True)
 
 
 def _who(user: dict) -> dict:
-    return {"id": user["id"], "name": user.get("name") or "Someone", "email": user.get("email") or ""}
+    """How a person is recorded: no email, so nobody's address is passed around."""
+    return {"id": user["id"], "name": user.get("name") or "Someone", "email": ""}
 
 
 def _is_reviewer(user: dict) -> bool:
@@ -139,6 +172,24 @@ def summary(item: dict) -> dict:
 
 # ---------- commands ----------
 
+def _int(value, what: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        raise CommandError(f"{what} must be a whole number") from None
+
+
+def _drop_old_videos(item_id: str, keep: int) -> None:
+    """Keep the records, not the old videos. One still being watched (Windows
+    won't delete an open file) goes the next time."""
+    for old in _files(item_id).glob("v*.mp4"):
+        if old.name != f"v{keep}.mp4":
+            try:
+                old.unlink(missing_ok=True)
+            except PermissionError:
+                pass
+
+
 @command
 def review_submit(jobId: str, clip: int, message: str | None = None) -> dict:
     """Send this clip's latest render for review (a new version if it was sent before)."""
@@ -146,9 +197,11 @@ def review_submit(jobId: str, clip: int, message: str | None = None) -> dict:
     from ..spec.timeline import FPS, total_frames
 
     user = actor()
+    clip = _int(clip, "clip")
     job_dir = _job_dir(jobId)  # your own workspace only
     spec = store.load(job_dir, clip)
-    render_info = json.loads((store.clip_dir(job_dir, clip) / "render.json").read_text(encoding="utf-8")) if (store.clip_dir(job_dir, clip) / "render.json").exists() else None
+    info_path = store.clip_dir(job_dir, clip) / "render.json"
+    render_info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.exists() else None
     render = store.clip_dir(job_dir, clip) / "render.mp4"
     history = store.history(job_dir, clip)
     latest = history[-1]["version"] if history else None
@@ -157,39 +210,47 @@ def review_submit(jobId: str, clip: int, message: str | None = None) -> dict:
     if render_info.get("spec_version") != latest:
         raise CommandError("You've edited since the last render. Render again, then send it.")
     message = (message or "").strip()[:NOTE_MAX] or None
+    iid = item_id(user["id"], job_dir.name, clip)
 
-    with _lock:
-        iid = item_id(user["id"], job_dir.name, clip)
-        item = load(iid) or {
-            "id": iid, "owner": _who(user), "jobId": job_dir.name, "clip": int(clip),
-            "status": "to_review", "version": 0, "versions": [], "notes": [], "reviewer": None, "events": [],
-        }
-        last = item["versions"][-1] if item["versions"] else None
-        if last and last.get("specVersion") == latest and item["status"] in ("to_review", "good"):
+    def check(item: dict | None) -> None:
+        last = item["versions"][-1] if item and item["versions"] else None
+        if item and last and last.get("specVersion") == latest and item["status"] in ("to_review", "good"):
             raise CommandError("This version is already with the team." if item["status"] == "to_review" else "This version was already marked good.")
-        n = item["version"] + 1
-        files = _files(iid)
-        files.mkdir(parents=True, exist_ok=True)
-        part = files / f"v{n}.part.mp4"
+
+    check(load(iid))
+    # The copy (an hour of video can take a while) and the thumbnail happen
+    # outside the lock, so nobody else waits on them.
+    files = _files(iid)
+    files.mkdir(parents=True, exist_ok=True)
+    part = files / f"incoming.{uuid.uuid4().hex[:8]}.part"
+    try:
         shutil.copyfile(render, part)
-        os.replace(part, files / f"v{n}.mp4")
-        for old in files.glob("v*.mp4"):  # keep the records, not the old videos
-            if old.name != f"v{n}.mp4":
-                old.unlink(missing_ok=True)
         thumb = thumbnail(job_dir.name, clip)
-        if thumb is not None:
-            shutil.copyfile(thumb, files / "thumb.jpg")
-        item.update(
-            title=spec.get("title") or _title(job_dir),
-            format=spec.get("format", "vertical"),
-            seconds=round(total_frames(spec) / FPS, 1),
-            status="to_review",
-            version=n,
-            owner={**item["owner"], "name": user.get("name") or item["owner"]["name"]},
-        )
-        item["versions"].append({"n": n, "specVersion": latest, "sentAt": _now(), "message": message})
-        item["events"].append({"kind": "sent", "by": _who(user), "at": _now(), "version": n})
-        save(item)
+        with _lock:
+            item = load(iid)
+            check(item)
+            item = item or {
+                "id": iid, "owner": _who(user), "jobId": job_dir.name, "clip": clip,
+                "status": "to_review", "version": 0, "versions": [], "notes": [], "reviewer": None, "events": [],
+            }
+            n = item["version"] + 1
+            _replace(part, files / f"v{n}.mp4")
+            if thumb is not None:
+                shutil.copyfile(thumb, files / "thumb.jpg")
+            item.update(
+                title=spec.get("title") or _title(job_dir),
+                format=spec.get("format", "vertical"),
+                seconds=round(total_frames(spec) / FPS, 1),
+                status="to_review",
+                version=n,
+                owner={**item["owner"], "name": user.get("name") or item["owner"]["name"]},
+            )
+            item["versions"].append({"n": n, "specVersion": latest, "sentAt": _now(), "message": message})
+            item["events"].append({"kind": "sent", "by": _who(user), "at": _now(), "version": n})
+            save(item)  # saved before the old video goes: never pointing at a deleted file
+    finally:
+        part.unlink(missing_ok=True)
+    _drop_old_videos(iid, n)
     return summary(item)
 
 
@@ -221,18 +282,24 @@ def review_decide(id: str, decision: str, version: int, notes: list[dict] | None
         raise CommandError("Only the communication team can review videos.")
     if decision not in ("good", "needs_work"):
         raise CommandError("decision must be good or needs_work")
+    version = _int(version, "version")
+    if notes is not None and not isinstance(notes, list):
+        raise CommandError("notes must be a list")
     clean = []
     for note in (notes or [])[:NOTES_MAX]:
+        if not isinstance(note, dict):
+            raise CommandError("each note needs a text")
         text = str(note.get("text") or "").strip()[:NOTE_MAX]
         at = note.get("time")
         if not text:
             continue
-        clean.append({"time": round(float(at), 2) if isinstance(at, (int, float)) and at >= 0 else None, "text": text})
+        timed = isinstance(at, (int, float)) and not isinstance(at, bool) and math.isfinite(at) and at >= 0
+        clean.append({"time": round(float(at), 2) if timed else None, "text": text})
     if decision == "needs_work" and not clean:
         raise CommandError("Say what needs fixing: add at least one note.")
     with _lock:
         item = _get_for(user, id)
-        if int(version) != item["version"]:
+        if version != item["version"]:
             raise CommandError(f"There's a newer version (v{item['version']}) of this video. Watch that one first.")
         if item["status"] != "to_review":
             raise CommandError("Someone already reviewed this version.")
@@ -254,7 +321,7 @@ def review_note_fixed(id: str, noteId: str, fixed: bool = True) -> dict:
         item = _get_for(user, id)
         if item["owner"]["id"] != user["id"] and user["role"] != "admin":
             raise CommandError("Only the video's editor can tick off its notes.")
-        note = next((n for n in item["notes"] if n["id"] == noteId), None)
+        note = next((n for n in item["notes"] if isinstance(n, dict) and n.get("id") == noteId), None)
         if note is None:
             raise CommandError("no such note")
         note["fixed"] = bool(fixed)
@@ -265,7 +332,7 @@ def review_note_fixed(id: str, noteId: str, fixed: bool = True) -> dict:
 # ---------- the video itself (a <video> tag can't send headers: media token) ----------
 
 @app.get("/api/review/file")
-async def review_file(id: str, download: int = 0, what: str = "video") -> FileResponse:
+def review_file(id: str, download: int = 0, what: str = "video") -> FileResponse:
     try:
         who = actor()  # the sign-in token, or a media token carrying the role
         item = _get_for(who, id)
@@ -279,11 +346,12 @@ async def review_file(id: str, download: int = 0, what: str = "video") -> FileRe
     path = current_file(item)
     if path is None:
         raise HTTPException(404)
-    if download:
+    if download and _is_reviewer(who):  # the team's downloads are what the record tracks
         with _lock:
             fresh = load(item["id"]) or item
             fresh["events"].append({"kind": "downloaded", "by": _who(who), "at": _now(), "version": fresh["version"]})
             save(fresh)
+    if download:
         name = re.sub(r"[^A-Za-z0-9._ -]+", "", f"{item.get('title') or 'video'} v{item['version']}.mp4").strip() or "video.mp4"
         return FileResponse(path, media_type="video/mp4", filename=name)
     return FileResponse(path, media_type="video/mp4")

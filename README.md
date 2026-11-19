@@ -28,14 +28,32 @@ A browser editor where you talk to Claude Code and watch the clip change.
 2. Transcription, diarization, audio events and the smart camera run on a
    Modal GPU (or this PC), and produce one `spec.json` for the clip: words,
    caption style, crop keyframes, punch-ins, intro photo, cuts, effects.
-3. The centre of the editor is a live Remotion preview of that spec. Caption
-   styles (9, with previews), word fixes, cuts, the intro photo and effects
-   change instantly, with no re-render.
-4. The chat on the right runs your own `claude` CLI in the clip's folder. It
-   may only edit `spec.json` and validate it. Its edits show up while it is
-   still answering. Every change (yours or Claude's) can be undone.
-5. **Render** produces the final mp4 on Modal (16 CPUs) or locally, then
-   download it or send it to Telegram.
+3. Most of the editor is a live Remotion preview of that spec. Every tool sits
+   in one panel on the left (AI, Captions, Look, Intro & outro, Music, Effects,
+   Overlays, Trim) and a timeline runs along the bottom: drag it to scrub, zoom
+   with the slider or Ctrl+wheel, click an effect to open it. Changes show
+   instantly, with no re-render.
+4. **Overlays**: a photo, GIF or video on top of the clip (a logo in a corner,
+   a floating GIF). Drag it on the preview, pull a corner to resize, drag its
+   bar on the timeline to set when it shows. Uploaded files go into a shared
+   team library. Delete removes the selected overlay or open effect.
+5. The **AI** tab is a chat. Online it uses the model the admin picks; on the
+   desktop it runs your own `claude` CLI in the clip's folder. It may only edit
+   `spec.json`, and its edits show up while it is still answering. Every change
+   (yours or the AI's) can be undone.
+6. **Render** produces the final mp4 on Modal (16 CPUs) or locally, then
+   download it, send it for review (online), or send it to Telegram (desktop).
+
+### Review (online, for a team)
+
+Editors press **Send for review** after rendering. The communication team opens
+**Review**, watches each video and marks it **Good** or **Needs work**, with notes
+at a time in the video. A video sent back opens on its notes in the editor;
+the editor ticks them off and sends a new version. Good videos are downloaded
+from Review and posted by hand. **Record** shows who edited, reviewed and
+downloaded what. Roles come from Supabase: set a user's app metadata to
+`{"role": "reviewer"}` for the communication team or `{"role": "admin"}`; anyone
+else is an editor. The team guide is `docs/TEAM-GUIDE.md`.
 
 ```sh
 cd studio && npm install && npm run build -w editor     # once, and after editor changes
@@ -99,7 +117,8 @@ video), which is what the cloud path is for.
 ## Development
 
 ```sh
-# pipeline tests
+# pipeline tests (some need ffmpeg: on a PC without it on PATH, point
+# TETCLIPPER_FFMPEG at ~/.tetclipper/bin/ffmpeg.exe)
 cd pipeline && uv sync --group dev --group pipeline && uv run pytest
 
 # Studio from a terminal

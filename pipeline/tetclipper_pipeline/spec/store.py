@@ -49,30 +49,48 @@ def _history(job_dir: Path, clip_idx: int) -> list[Path]:
     return sorted(hist.glob("*.json")) if hist.is_dir() else []
 
 
+def dumps(spec: dict) -> str:
+    """spec.json's text: indented, but one caption word per line. An hour of
+    words written fully indented took most of a save (Python's JSON writer is
+    slow once it indents), and one line per word is easier to edit by hand."""
+    words = spec.get("words")
+    if not isinstance(words, list) or not words:
+        return json.dumps(spec, indent=1, ensure_ascii=False)
+    marker = "\u0000words\u0000"
+    head = json.dumps({**spec, "words": marker}, indent=1, ensure_ascii=False)
+    body = ",\n".join("  " + json.dumps(w, ensure_ascii=False) for w in words)
+    return head.replace(json.dumps(marker), "[\n" + body + "\n ]", 1)
+
+
 def save(job_dir: Path, clip_idx: int, spec: dict, reason: str = "") -> dict:
     """Validate, write spec.json + transcript.md, and append a history entry.
     Raises ValueError (with every problem) when the spec is invalid."""
     from .transcript import write as write_transcript
 
-    problems = validate(spec)
-    if problems:
-        raise ValueError("invalid spec: " + "; ".join(problems))
     d = clip_dir(job_dir, clip_idx)
     hist_now = _history(job_dir, clip_idx)
-    if hist_now and not reason.startswith("built"):
-        # Every caption fix (the user's or Claude's) teaches the word list.
-        from . import glossary
-
+    previous = None
+    if hist_now:
         try:
             previous = json.loads(hist_now[-1].read_text(encoding="utf-8"))
         except (OSError, ValueError):
             previous = None
-        if previous is not None:
+    # Most edits leave the words alone; the last version's were checked when it
+    # was saved, so check (and learn from) the words only when they changed.
+    same_words = isinstance(previous, dict) and previous.get("words") == spec.get("words")
+    problems = validate({**spec, "words": []} if same_words and isinstance(spec, dict) else spec)
+    if problems:
+        raise ValueError("invalid spec: " + "; ".join(problems))
+    if previous is not None and not reason.startswith("built"):
+        if not same_words:
+            # Every caption fix (the user's or Claude's) teaches the word list.
+            from . import glossary
+
             glossary.learn(previous.get("words", []), spec.get("words", []))
-            if not reason.startswith("checked captions"):
-                spec = {**spec, "doubts": _unresolved(previous, spec)}
+        if not reason.startswith("checked captions"):
+            spec = {**spec, "doubts": _unresolved(previous, spec)}
     (d / "history").mkdir(parents=True, exist_ok=True)
-    text = json.dumps(spec, indent=1, ensure_ascii=False)
+    text = dumps(spec)
     hist = _history(job_dir, clip_idx)
     if not hist or hist[-1].read_text(encoding="utf-8") != text:
         n = int(hist[-1].stem) + 1 if hist else 1

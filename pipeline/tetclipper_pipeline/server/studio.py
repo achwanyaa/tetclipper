@@ -512,7 +512,10 @@ def overlay_library_add(path: str) -> dict:
     while dest.exists():
         dest = root / f"{stem}-{n}{src.suffix.lower()}"
         n += 1
-    shutil.copyfile(src, dest)
+    if src.parent == (workspace_dir() / "uploads").resolve():
+        shutil.move(src, dest)  # a fresh upload: don't keep it twice
+    else:
+        shutil.copyfile(src, dest)
     return _overlay_item(dest)
 
 

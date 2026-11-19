@@ -285,7 +285,7 @@ input[type='file'] { height: auto; padding: 6px; }
 .tl-body { display: grid; grid-template-columns: 64px minmax(0, 1fr); column-gap: 12px; }
 .tl-body .labels { display: flex; flex-direction: column; gap: 6px; }
 .tl-scroll { overflow-x: auto; overflow-y: hidden; min-width: 0; scrollbar-width: thin; }
-.tl-content { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 100%; cursor: pointer; touch-action: pan-x; user-select: none; padding-bottom: 2px; }
+.tl-content { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 100%; cursor: pointer; touch-action: none; user-select: none; padding-bottom: 2px; }
 .tl-content.dragging { cursor: ew-resize; }
 .ruler-row { height: 20px; }
 .fx-row { height: 24px; }
@@ -695,3 +695,5 @@ button.round-play:hover:not(:disabled) { background: var(--ac); filter: brightne
 @media (max-width: 1240px) { .steps { visibility: hidden; } }
 .topbar > * { flex-shrink: 0; }
 .topbar > .steps, .topbar > .clip-picker { flex-shrink: 1; }
+.view-keep { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.view-keep[hidden] { display: none; }

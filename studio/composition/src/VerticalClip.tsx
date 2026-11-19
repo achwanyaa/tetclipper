@@ -5,7 +5,7 @@ import { MediaOverlays } from './effects/MediaOverlays'
 import { Overlays } from './effects/Overlays'
 import { Bookends } from './Bookend'
 import { musicGains, musicRange } from './music'
-import { FPS, clipSpecSchema, frameSize, type ClipSpec, type ClipSpecInput } from './spec'
+import { FPS, clipSpecSchema, frameSize, parseClipSpec, type ClipSpec, type ClipSpecInput } from './spec'
 import { buildTimeline } from './timeline'
 import { CutTransitions, SpeakerLayer, VideoLayer } from './VideoLayer'
 
@@ -22,7 +22,7 @@ function useParsedSpec(props: ClipSpecInput) {
     const keys = Object.keys(b)
     if (keys.length === Object.keys(a).length && keys.every((k) => a[k] === b[k])) return last.spec
   }
-  const spec = clipSpecSchema.parse(props)
+  const spec = parseClipSpec(props)
   cache.current = { props, spec }
   return spec
 }

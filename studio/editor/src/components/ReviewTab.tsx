@@ -8,7 +8,7 @@ interface Props {
   rendering: boolean
   onJump: (seconds: number) => void // a time in the rendered video = output time
   onFixed: (noteId: string, fixed: boolean) => void
-  onSend: (message: string | null) => void
+  onSend: (message: string | null) => Promise<void> | void
   onRenderAndSend: (message: string | null) => void
 }
 
@@ -70,7 +70,11 @@ export function ReviewTab({ item, fresh, sentLatest, rendering, onJump, onFixed,
         ))}
       </div>
       <p className="muted small">{open > 0 ? `${open} still to fix. Timed notes also show as marks on the timeline.` : 'All ticked off.'}</p>
-      <SendBox message={message} setMessage={setMessage} fresh={fresh} rendering={rendering} onSend={onSend} onRenderAndSend={onRenderAndSend} again />
+      {sentLatest ? (
+        <p className="note plain">You haven’t changed the clip since version {item.version} was sent back. Make the fixes, then render and send it again.</p>
+      ) : (
+        <SendBox message={message} setMessage={setMessage} fresh={fresh} rendering={rendering} onSend={onSend} onRenderAndSend={onRenderAndSend} again />
+      )}
     </div>
   )
 }
@@ -88,10 +92,11 @@ function SendBox({
   setMessage: (m: string) => void
   fresh: boolean
   rendering: boolean
-  onSend: (m: string | null) => void
+  onSend: (m: string | null) => Promise<void> | void
   onRenderAndSend: (m: string | null) => void
   again?: boolean
 }) {
+  const [sending, setSending] = useState(false)
   const text = message.trim() || null
   return (
     <div className="field send-box">
@@ -104,8 +109,19 @@ function SendBox({
           Rendering…
         </button>
       ) : fresh ? (
-        <button className="primary lg" onClick={() => onSend(text)}>
-          Send for review{again ? ' again' : ''}
+        <button
+          className="primary lg"
+          disabled={sending}
+          onClick={async () => {
+            setSending(true)
+            try {
+              await onSend(text)
+            } finally {
+              setSending(false)
+            }
+          }}
+        >
+          {sending ? 'Sending…' : `Send for review${again ? ' again' : ''}`}
         </button>
       ) : (
         <button className="primary lg" onClick={() => onRenderAndSend(text)}>

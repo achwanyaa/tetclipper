@@ -169,3 +169,36 @@ def test_the_desktop_app_has_one_admin(tmp_path, monkeypatch):
     iid = tc.post("/api/cmd/review_submit", json={"jobId": "job1", "clip": 0}).json()["id"]
     assert tc.post("/api/cmd/review_decide", json={"id": iid, "decision": "good", "version": 1}).json()["status"] == "good"
     assert review.item_id("local", "job1", 0) == iid
+
+
+def test_a_damaged_item_file_is_skipped_not_fatal(c, tmp_path):
+    render(tmp_path, MERCY)
+    cmd(c, "t-mercy", "review_submit", jobId="job1", clip=0)
+    items = tmp_path / "review" / "items"
+    (items / "junk.json").write_text("{}")
+    (items / "half.json").write_text('{"id": "half", "owner": {"id": "x"}')
+    assert len(cmd(c, "t-mercy", "review_list").json()) == 1
+    assert len(cmd(c, "t-joy", "review_list").json()) == 1
+    assert cmd(c, "t-joy", "review_get", id="junk").status_code == 400
+
+
+def test_bad_review_input_gets_a_plain_answer(c, tmp_path):
+    render(tmp_path, MERCY)
+    iid = cmd(c, "t-mercy", "review_submit", jobId="job1", clip=0).json()["id"]
+    raw = '{"id": "%s", "decision": "needs_work", "version": 1, "notes": [{"time": Infinity, "text": "x"}]}' % iid
+    res = c.post("/api/cmd/review_decide", content=raw, headers={"Authorization": "Bearer t-joy", "Content-Type": "application/json"})
+    assert res.status_code == 200 and res.json()["notes"][0]["time"] is None
+    assert cmd(c, "t-joy", "review_get", id=iid).status_code == 200  # still readable
+    for bad in ({"version": "abc"}, {"version": 1, "notes": "x"}, {"version": 1, "notes": ["x"]}):
+        assert cmd(c, "t-joy", "review_decide", id=iid, decision="good", **bad).status_code == 400
+    assert cmd(c, "t-mercy", "review_submit", jobId="job1", clip="first").status_code == 400
+
+
+def test_only_the_teams_downloads_are_recorded_and_no_emails_are_kept(c, tmp_path):
+    render(tmp_path, MERCY)
+    iid = cmd(c, "t-mercy", "review_submit", jobId="job1", clip=0).json()["id"]
+    mine = cmd(c, "t-mercy", "me").json()["media_token"]
+    assert c.get("/api/review/file", params={"id": iid, "download": 1, "access_token": mine}).status_code == 200
+    assert cmd(c, "t-owner", "review_list").json()[0]["lastDownload"] is None
+    item = cmd(c, "t-owner", "review_get", id=iid).json()
+    assert "@" not in json.dumps(item)

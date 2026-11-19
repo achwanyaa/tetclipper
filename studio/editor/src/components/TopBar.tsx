@@ -104,7 +104,7 @@ export function TopBar({ step, open, title, style, jobs, saving, canUndo, theme,
       )}
       {engine && (
         <button className="engine-btn" title="AI model for the chat (admin)" onClick={onAi}>
-          ✦ {engine}
+          ✦ AI model
         </button>
       )}
       <button className="icon" title={`Switch to ${document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'} theme`} onClick={theme.toggle}>

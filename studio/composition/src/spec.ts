@@ -337,6 +337,24 @@ export const clipSpecSchema = z.object({
     .default({})
 })
 
+// Checking an hour of words is most of what parsing a spec costs, and almost no
+// edit touches them (moving an overlay, a slider). The editor keeps the same
+// words array until they change, so remember the checked copy per array.
+const wordsChecked = new WeakMap<object, z.infer<typeof wordSchema>[]>()
+const wordList = z.array(wordSchema)
+
+/** clipSpecSchema.parse, reusing the checked words when the array is the same one. */
+export function parseClipSpec(input: z.input<typeof clipSpecSchema>): z.infer<typeof clipSpecSchema> {
+  const words = (input as { words?: unknown }).words
+  if (!Array.isArray(words) || words.length < 200) return clipSpecSchema.parse(input)
+  let checked = wordsChecked.get(words)
+  if (!checked) {
+    checked = wordList.parse(words)
+    wordsChecked.set(words, checked)
+  }
+  return { ...clipSpecSchema.parse({ ...input, words: [] }), words: checked }
+}
+
 export type Word = z.infer<typeof wordSchema>
 export type CropKeyframe = z.infer<typeof cropKeyframeSchema>
 export type Effect = z.infer<typeof effectSchema>

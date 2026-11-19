@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { FPS, frameAtSource, frameSize, outputSpan, overlayBox, overlaySchema, sourceTimeAt, type Overlay, type OverlayInput } from '@tetclipper/composition'
+import { FPS, frameSize, outputSpan, overlayBox, overlaySchema, sourceTimeAt, type Overlay, type OverlayInput } from '@tetclipper/composition'
 import { fileUrl, invoke, parseClock, upload } from '../api'
 import type { PanelProps } from './Canvas'
 
@@ -47,7 +47,11 @@ export function OverlaysPanel({ data, spec, editor, update, setError, timeline, 
   const file = useRef<HTMLInputElement>(null)
   const format = spec.format ?? 'vertical'
   const { width: W, height: H } = frameSize(format)
-  const overlays: Overlay[] = (spec.overlays ?? []).map((o) => overlaySchema.parse(o))
+  // One bad overlay (a hand edit) must not take the whole editor down: skip it here.
+  const overlays: Overlay[] = (spec.overlays ?? []).flatMap((o) => {
+    const r = overlaySchema.safeParse(o)
+    return r.success ? [r.data] : []
+  })
   const current = overlays.find((o) => o.id === selected) ?? null
 
   useEffect(() => {
@@ -106,10 +110,12 @@ export function OverlaysPanel({ data, spec, editor, update, setError, timeline, 
   }
 
   // ---- times: shown and typed as clip time, stored as source seconds ----
-  const shownTime = (t: number | null, fallback: string) => {
-    if (t === null || !timeline) return fallback
-    const f = frameAtSource(timeline, t, FPS)
-    return f === null ? fallback : clockOf(f)
+  // Shown from where the overlay really starts and stops on screen, so a time
+  // that falls inside a cut shows the moment the overlay appears or leaves.
+  const shownTimes = (o: Overlay): [string, string] => {
+    const span = timeline ? outputSpan(timeline, o.from, o.to, FPS) : null
+    if (!span || !timeline) return [o.from === null ? 'start' : '—', o.to === null ? 'end' : '—']
+    return [o.from === null ? 'start' : clockOf(span[0]), o.to === null ? 'end' : clockOf(span[1])]
   }
   const typedTime = (text: string): number | null => {
     if (!timeline) return null
@@ -166,7 +172,7 @@ export function OverlaysPanel({ data, spec, editor, update, setError, timeline, 
             {overlays.map((o) => (
               <button key={o.id} className={o.id === selected ? 'on' : ''} onClick={() => setSelected(o.id === selected ? null : o.id)}>
                 <span className="ov-name">{name(o.src)}</span>
-                <span className="muted small mono">{o.from === null && o.to === null ? 'whole clip' : `${shownTime(o.from, 'start')}–${shownTime(o.to, 'end')}`}</span>
+                <span className="muted small mono">{o.from === null && o.to === null ? 'whole clip' : shownTimes(o).join('–')}</span>
               </button>
             ))}
           </div>
@@ -200,7 +206,7 @@ export function OverlaysPanel({ data, spec, editor, update, setError, timeline, 
                   const x = [box.width / 2 + mx, 0.5, 1 - box.width / 2 - mx][col]
                   const y = [box.height / 2 + my, 0.5, 1 - box.height / 2 - my][row]
                   const on = Math.abs(current.x - x) < 0.002 && Math.abs(current.y - y) < 0.002
-                  return <button key={label} className={on ? 'on' : ''} aria-label={label} title={label} onClick={() => patch(current.id, { x: clamp(x, 0, 1), y: clamp(y, 0, 1) }, 'move overlay')} />
+                  return <button key={label} className={on ? 'on' : ''} aria-label={label} aria-pressed={on} title={label} onClick={() => patch(current.id, { x: clamp(x, 0, 1), y: clamp(y, 0, 1) }, 'move overlay')} />
                 })}
               </div>
             </div>
@@ -236,13 +242,13 @@ export function OverlaysPanel({ data, spec, editor, update, setError, timeline, 
             <div className="ov-times">
               <TimeBox
                 label="Appears at"
-                value={shownTime(current.from, 'start')}
+                value={shownTimes(current)[0]}
                 onCommit={(text) => commitTime(current, 'from', text)}
                 onPlayhead={() => editor.playhead !== null && setTime(current, 'from', editor.playhead)}
               />
               <TimeBox
                 label="Leaves at"
-                value={shownTime(current.to, 'end')}
+                value={shownTimes(current)[1]}
                 onCommit={(text) => commitTime(current, 'to', text)}
                 onPlayhead={() => editor.playhead !== null && setTime(current, 'to', editor.playhead)}
               />

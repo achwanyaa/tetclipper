@@ -379,6 +379,20 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
 
   const undo = useCallback(async () => {
     if (!open) return
+    // An edit still waiting to be saved (the 350 ms pause) is saved first, so
+    // Undo takes back that edit instead of having it written again afterwards.
+    const waiting = pending.current
+    if (waiting) {
+      window.clearTimeout(saveTimer.current)
+      pending.current = null
+      try {
+        await invoke('studio_save', { jobId: open.jobId, clip: open.clip, spec: waiting.spec, reason: waiting.reason })
+      } catch (e) {
+        setError(String((e as Error).message ?? e))
+      } finally {
+        setSaving(false)
+      }
+    }
     try {
       const res = await invoke<{ spec: ClipSpecInput; history: ClipData['history'] }>('studio_undo', open)
       setSpec(res.spec)
@@ -495,9 +509,10 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
         </div>
       )}
 
-      {view === 'review' ? (
+      {view === 'review' && (
         <Review items={reviews} role={role} onChanged={refreshReviews} setError={setError} onOpenClip={reviewer ? undefined : openClip} focus={reviewFocus} />
-      ) : view === 'record' ? (
+      )}
+      {view === 'record' && (
         <Record
           items={reviews}
           role={role}
@@ -506,32 +521,40 @@ function Studio({ account, onSignOut }: { account: Account | null; onSignOut?: (
             setView('review')
           }}
         />
-      ) : open ? (
+      )}
+      {/* The editor stays alive behind Review and Record, so the chat, the open
+          tool and the timeline are as you left them when you come back. */}
+      {open ? (
         data && spec ? (
-          <Canvas
-            key={`${data.jobId}/${data.clip}`}
-            data={data}
-            spec={spec}
-            editor={editor}
-            setEditor={setEditor}
-            update={update}
-            undo={undo}
-            run={run}
-            onRender={startRender}
-            setError={setError}
-            online={!!account}
-            admin={isAdmin}
-            review={reviewItem}
-            onSendForReview={(message) => sendForReview(message)}
-            onRenderAndSend={renderAndSend}
-            onNoteFixed={noteFixed}
-          />
-        ) : (
-          <div className="home">
-            <span className="muted">Opening clip…</span>
+          <div className="view-keep" hidden={!editing}>
+            <Canvas
+              key={`${data.jobId}/${data.clip}`}
+              active={editing}
+              data={data}
+              spec={spec}
+              editor={editor}
+              setEditor={setEditor}
+              update={update}
+              undo={undo}
+              run={run}
+              onRender={startRender}
+              setError={setError}
+              online={!!account}
+              admin={isAdmin}
+              review={reviewItem}
+              onSendForReview={(message) => sendForReview(message)}
+              onRenderAndSend={renderAndSend}
+              onNoteFixed={noteFixed}
+            />
           </div>
+        ) : (
+          editing && (
+            <div className="home">
+              <span className="muted">Opening clip…</span>
+            </div>
+          )
         )
-      ) : screen === 'new' ? (
+      ) : !editing ? null : screen === 'new' ? (
         <NewClip busy={jobBusy} online={!!account} onCut={(a) => startJob('cut', a)} onFind={(a) => startJob('find', a)} onLong={(a) => startJob('long', a)} />
       ) : (
         <Home

@@ -4,7 +4,7 @@ import {
   FPS,
   VerticalClip,
   buildTimeline,
-  clipSpecSchema,
+  parseClipSpec,
   frameAtSource,
   frameSize,
   sourceTimeAt,
@@ -68,9 +68,10 @@ interface Props {
   online?: boolean // hosted app: Telegram is linked per server, not per user, so it's hidden
   admin?: boolean
   review?: ReviewItem | null // this clip's review, if it was sent
-  onSendForReview?: (message: string | null) => void
+  onSendForReview?: (message: string | null) => Promise<void> | void
   onRenderAndSend?: (message: string | null) => void
   onNoteFixed?: (noteId: string, fixed: boolean) => void
+  active?: boolean // false while Review or Record is in front: no shortcuts, no playback
 }
 
 const clock = (frames: number) => {
@@ -80,7 +81,7 @@ const clock = (frames: number) => {
 
 /** Edit step: every tool and the AI chat on the left, a big live preview, and
  *  the lane timeline along the bottom. */
-export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRender, setError, online = false, admin = false, review = null, onSendForReview, onRenderAndSend, onNoteFixed }: Props) {
+export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRender, setError, online = false, admin = false, review = null, onSendForReview, onRenderAndSend, onNoteFixed, active = true }: Props) {
   const player = useRef<PlayerRef>(null)
   // A clip sent back with notes opens on them.
   const [tab, setTab] = useState<Tab>('AI')
@@ -93,6 +94,15 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
   const [frame, setFrame] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [selectedEffect, setSelectedEffect] = useState<number | null>(null)
+  // The open effect is an index into spec.effects; remember what it was so an
+  // edit elsewhere (the AI removing an earlier one) can't move it onto another.
+  const effectKey = useRef<{ type: string; at: number } | null>(null)
+  const selectEffect = useCallback((i: number | null) => {
+    effectKey.current = null
+    setSelectedEffect(i)
+  }, [])
+  const activeRef = useRef(active)
+  activeRef.current = active
   const [selectedOverlay, setSelectedOverlay] = useState<string | null>(null)
   const chat = useChat(data, editor)
   // A seek reports the same spot twice (ours, then the player's): render once.
@@ -100,7 +110,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
 
   const parsed = useMemo(() => {
     try {
-      return clipSpecSchema.parse(spec)
+      return parseClipSpec(spec)
     } catch {
       return null
     }
@@ -109,11 +119,32 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
   const inputProps = useMemo(() => resolveForPlayer(spec, data.jobDir, data.preview), [spec, data.jobDir, data.preview])
   const size = parsed ? frameSize(parsed.format) : null
 
-  // Something else removed the selected overlay or effect (undo, the AI).
+  // Something else changed the list (undo, the AI): follow the open effect to
+  // where it is now, or close it if it's gone. Same for the selected overlay.
   useEffect(() => {
     if (selectedOverlay && !parsed?.overlays.some((o) => o.id === selectedOverlay)) setSelectedOverlay(null)
-    if (selectedEffect !== null && selectedEffect >= (parsed?.effects.length ?? 0)) setSelectedEffect(null)
+    if (selectedEffect === null) return
+    const list = parsed?.effects ?? []
+    const here = list[selectedEffect]
+    const key = effectKey.current
+    if (!key) {
+      if (here) effectKey.current = { type: here.type, at: here.at }
+      else setSelectedEffect(null)
+      return
+    }
+    if (here && here.type === key.type && here.at === key.at) return
+    const moved = list.findIndex((e) => e.type === key.type && e.at === key.at)
+    if (moved >= 0) setSelectedEffect(moved)
+    else {
+      effectKey.current = null
+      setSelectedEffect(null)
+    }
   }, [parsed, selectedOverlay, selectedEffect])
+
+  // Behind Review or Record: stop playing.
+  useEffect(() => {
+    if (!active) player.current?.pause()
+  }, [active])
 
   // Track the playhead (~8×/s is plenty for highlighting) and play state.
   useEffect(() => {
@@ -136,7 +167,13 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
       stopPreview() // the clip and a track preview never play over each other
       setPlaying(true)
     }
-    const onPause = () => setPlaying(false)
+    const onPause = () => {
+      setPlaying(false)
+      // The frame display updates ~8×/s while playing: settle on the exact frame.
+      const f = p.getCurrentFrame()
+      setFrame(f)
+      setPlayhead(sourceTimeAt(timeline, f, FPS))
+    }
     p.addEventListener('frameupdate', onFrame)
     p.addEventListener('seeked', onSeeked)
     p.addEventListener('play', onPlay)
@@ -154,7 +191,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
   // Space plays/pauses unless you're typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== ' ' || e.repeat) return
+      if (e.key !== ' ' || e.repeat || !activeRef.current) return
       const t = e.target as HTMLElement
       if (t.closest('input, textarea, select, button, [contenteditable="true"], [role="slider"]')) return
       e.preventDefault()
@@ -190,7 +227,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
 
   const openEffect = (index: number) => {
     setTab('Effects')
-    setSelectedEffect(index)
+    selectEffect(index)
     const e = parsed?.effects[index]
     if (e) seek(e.at)
   }
@@ -217,7 +254,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
     }
     if (tab === 'Effects' && selectedEffect !== null && spec.effects?.[selectedEffect]) {
       update({ ...spec, effects: (spec.effects ?? []).filter((_, i) => i !== selectedEffect) }, `remove ${fxLabel(spec.effects[selectedEffect].type)}`)
-      setSelectedEffect(null)
+      selectEffect(null)
       return true
     }
     return false
@@ -226,7 +263,7 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
     const onKey = (e: KeyboardEvent) => {
       if ((e.key !== 'Delete' && e.key !== 'Backspace') || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
       const t = e.target as HTMLElement
-      if (t.closest('input, textarea, select, [contenteditable="true"]')) return
+      if (!activeRef.current || t.closest('input, textarea, select, [contenteditable="true"], .modal-backdrop, .drawer-backdrop')) return
       if (removeSelected.current()) e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
@@ -291,11 +328,11 @@ export function Canvas({ data, spec, editor, setEditor, update, undo, run, onRen
             {tab === 'Look' && <StylePanel {...panel} />}
             {tab === 'Intro & outro' && <IntroPanel {...panel} />}
             {tab === 'Music' && <MusicPanel {...panel} />}
-            {tab === 'Effects' && <EffectsPanel {...panel} open={selectedEffect} setOpen={setSelectedEffect} />}
+            {tab === 'Effects' && <EffectsPanel {...panel} open={selectedEffect} setOpen={selectEffect} />}
             {tab === 'Overlays' && <OverlaysPanel {...panel} selected={selectedOverlay} setSelected={setSelectedOverlay} admin={admin} />}
             {tab === 'Trim' && <TrimPanel {...panel} />}
           </div>
-          <RenderFooter data={data} run={run} onRender={onRender} setError={setError} online={online} review={review} onSend={() => onSendForReview?.(null)} onReviewTab={() => setTab('Review')} />
+          <RenderFooter data={data} run={run} onRender={onRender} setError={setError} online={online} review={review} onSend={async () => onSendForReview?.(null)} onReviewTab={() => setTab('Review')} />
         </div>
       </aside>
 
@@ -386,10 +423,11 @@ function RenderFooter({
   setError: (e: string | null) => void
   online: boolean
   review: ReviewItem | null
-  onSend: () => void
+  onSend: () => Promise<void> | void
   onReviewTab: () => void
 }) {
   const [sending, setSending] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const rendering = run?.kind === 'render' && run.jobId === data.jobId && run.clip === data.clip
   const latest = data.history[data.history.length - 1]?.version ?? 0
   const r = data.render
@@ -397,7 +435,7 @@ function RenderFooter({
   const download = r ? fileUrl(r.output, true) : ''
   // Online, a finished render goes to the communication team next.
   const sentThis = !!review && review.versions[review.versions.length - 1]?.specVersion === latest
-  const offerSend = online && fresh && (!sentThis || review?.status === 'needs_work')
+  const offerSend = online && fresh && !sentThis // an unchanged version that was sent back isn't offered again here
 
   const telegram = (
     <button
@@ -471,8 +509,19 @@ function RenderFooter({
       )}
 
       {offerSend ? (
-        <button className="primary big" onClick={onSend}>
-          Send for review
+        <button
+          className="primary big"
+          disabled={submitting}
+          onClick={async () => {
+            setSubmitting(true)
+            try {
+              await onSend()
+            } finally {
+              setSubmitting(false)
+            }
+          }}
+        >
+          {submitting ? 'Sending…' : 'Send for review'}
         </button>
       ) : r && fresh ? (
         <a className="btn primary big" href={download}>

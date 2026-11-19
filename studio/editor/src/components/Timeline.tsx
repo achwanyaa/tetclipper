@@ -124,7 +124,8 @@ export function Timeline({ timeline, spec, frame, playing, playhead, seekFrame, 
 
   // ---- overlay bars: drag the middle to move, an end to change when it starts or stops ----
   type BarMode = 'move' | 'start' | 'end'
-  const bar = useRef<{ id: string; mode: BarMode; x0: number; left: number; end: number; moved: boolean } | null>(null)
+  // The live position is kept in the ref too: a quick flick can end before React draws it.
+  const bar = useRef<{ id: string; mode: BarMode; x0: number; left: number; end: number; moved: boolean; live: { left: number; end: number } | null } | null>(null)
   const [barLive, setBarLive] = useState<{ id: string; left: number; end: number } | null>(null)
   const first = timeline.introFrames
   const last = timeline.videoEnd // frame after the video's last
@@ -137,7 +138,7 @@ export function Timeline({ timeline, spec, frame, playing, playhead, seekFrame, 
     const o = overlays.find((b) => b.id === id)
     if (!o) return
     e.currentTarget.setPointerCapture(e.pointerId)
-    bar.current = { id, mode, x0: e.clientX, left: o.left, end: o.end, moved: false }
+    bar.current = { id, mode, x0: e.clientX, left: o.left, end: o.end, moved: false, live: null }
   }
   const barMove = (e: PointerEvent<HTMLElement>) => {
     const b = bar.current
@@ -153,6 +154,7 @@ export function Timeline({ timeline, spec, frame, playing, playhead, seekFrame, 
       end += shift
     } else if (b.mode === 'start') left = Math.max(first, Math.min(b.end - minFrames, b.left + d))
     else end = Math.min(last, Math.max(b.left + minFrames, b.end + d))
+    b.live = { left, end }
     setBarLive({ id: b.id, left, end })
   }
   const barUp = (e: PointerEvent<HTMLElement>) => {
@@ -160,7 +162,7 @@ export function Timeline({ timeline, spec, frame, playing, playhead, seekFrame, 
     bar.current = null
     if (!b) return
     e.stopPropagation()
-    const live = barLive && barLive.id === b.id ? barLive : null
+    const live = b.live
     setBarLive(null)
     if (!b.moved || !live) {
       onOverlay(b.id)

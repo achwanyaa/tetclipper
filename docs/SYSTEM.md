@@ -7,6 +7,20 @@ Claude Design, which will design the online UI.
 > **Screenshots** of every current screen are in `docs/screens/` (section 4.0). A real clip spec is `docs/sample-spec.json`.
 > The product's name is **tetclipper**, always lower case and nothing else.
 
+> **Update, 19 Nov 2026.** This brief is from before the editor redesign and the team review. Where it disagrees with
+> the code, the code wins. What changed:
+> - **Edit screen** (`studio/editor/src/components/Canvas.tsx`): every tool and the AI chat sit in one left panel (a rail of
+>   tabs plus the open tool, render footer at its foot); the preview fills the rest; the timeline (`Timeline.tsx`) runs full
+>   width underneath with drag-to-scrub, zoom, clickable effects, overlay bars and review-note marks. The AI is a chat tab
+>   (`AiChat.tsx`, state in `chat.ts`), not a bar under the timeline.
+> - **Overlays**: `spec.overlays` (photos, GIFs, videos on top of the clip; `from`/`to` in source seconds, null = the clip's
+>   ends; position and size as fractions of the frame). Drawn by `composition/src/effects/MediaOverlays.tsx`; dragged on the
+>   preview by `OverlayLayer.tsx`; set up in `OverlaysPanel.tsx`. Files live in a shared team library at `home/overlays`.
+> - **Review** (`pipeline/tetclipper_pipeline/server/review.py`, screens `Review.tsx`, `Record.tsx`, `ReviewTab.tsx`): roles
+>   admin / reviewer / editor from Supabase `app_metadata.role`; editors send renders, reviewers mark Good or Needs work with
+>   timed notes; items are JSON files under `home/review`. Posting stays manual. The team guide is `docs/TEAM-GUIDE.md`.
+> - Section 5.8 (Post panel) is not being built for now.
+
 ---
 
 ## 0. What we want back from Claude Design
